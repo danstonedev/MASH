@@ -49,7 +49,7 @@ jobs:
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ICY_HILL_0B374A51E }}
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ICY_HILL_0B374A51E || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GENTLE_GRASS_0CB90E410 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           skip_app_build: true
@@ -68,6 +68,6 @@ jobs:
         id: closepullrequest
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ICY_HILL_0B374A51E }}
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_ICY_HILL_0B374A51E || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GENTLE_GRASS_0CB90E410 }}
           action: "close"
           app_location: "mash-app"
