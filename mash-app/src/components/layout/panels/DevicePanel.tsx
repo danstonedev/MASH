@@ -528,6 +528,13 @@ export function DevicePanel() {
       ? topologySensorCount
       : connectedSensorCountFromRegistry;
 
+  // Topology detection
+  const topologyResult: TopologyDetectionResult | null = useMemo(() => {
+    const segments = Array.from(assignments.values()).map((a) => a.segmentId);
+    if (segments.length === 0) return null;
+    return detectTopology(segments);
+  }, [assignments]);
+
   const detectedTopology = topologyResult?.topology || activeTopology;
 
   const calibrationPreflight = useMemo(() => {
@@ -650,13 +657,6 @@ export function DevicePanel() {
 
   // Workflow states
   const hasAssignments = assignments.size > 0;
-
-  // Topology detection
-  const topologyResult: TopologyDetectionResult | null = useMemo(() => {
-    const segments = Array.from(assignments.values()).map((a) => a.segmentId);
-    if (segments.length === 0) return null;
-    return detectTopology(segments);
-  }, [assignments]);
 
   // Calibration animation loop
   const processCalibrationFrame = useCallback(
