@@ -1,0 +1,43 @@
+# --- Web App Ignores ---
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- Firmware / Arduino Ignores ---
+# Build files
+imu-connect/dist/
+firmware/**/build/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.a
+*.d
+
+# OS generated files
+.DS_Store
+Thumbs.db

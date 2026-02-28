@@ -1,0 +1,59 @@
+﻿
+> imu-connect@0.0.0 build
+> vite build
+
+[36mvite v7.2.7 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32mΓ£ô[39m 3000 modules transformed.
+node.exe : [31mΓ£ù[39m Build failed in 8.61s
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo          : NotSpecified: ([31mΓ£ù[39m Build  
+   failed in 8.61s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[31merror during build:
+[31msrc/lib/export/opensimExport.ts (23:9): "db" is not exported 
+by "src/lib/db/index.ts", imported by 
+"src/lib/export/opensimExport.ts".[31m
+file: [36mC:/Users/danst/IMU Connect 
+App/imu-connect/src/lib/export/opensimExport.ts:23:9[31m
+[33m
+21:  */
+22: 
+23: import { db, type RecordedFrame, type RecordingSession } from 
+'../db';
+             ^
+24: import * as THREE from 'three';
+[31m
+    at getRollupError (file:///C:/Users/danst/IMU%20Connect%20App/
+imu-connect/node_modules/rollup/dist/es/shared/parseAst.js:401:41)
+    at error (file:///C:/Users/danst/IMU%20Connect%20App/imu-conne
+ct/node_modules/rollup/dist/es/shared/parseAst.js:397:42)
+    at Module.error (file:///C:/Users/danst/IMU%20Connect%20App/im
+u-connect/node_modules/rollup/dist/es/shared/node-entry.js:16956:1
+6)
+    at Module.traceVariable (file:///C:/Users/danst/IMU%20Connect%
+20App/imu-connect/node_modules/rollup/dist/es/shared/node-entry.js
+:17412:29)
+    at ModuleScope.findVariable (file:///C:/Users/danst/IMU%20Conn
+ect%20App/imu-connect/node_modules/rollup/dist/es/shared/node-entr
+y.js:15076:39)
+    at FunctionScope.findVariable (file:///C:/Users/danst/IMU%20Co
+nnect%20App/imu-connect/node_modules/rollup/dist/es/shared/node-en
+try.js:5649:38)
+    at FunctionBodyScope.findVariable (file:///C:/Users/danst/IMU%
+20Connect%20App/imu-connect/node_modules/rollup/dist/es/shared/nod
+e-entry.js:5649:38)
+    at MemberExpression.bind (file:///C:/Users/danst/IMU%20Connect
+%20App/imu-connect/node_modules/rollup/dist/es/shared/node-entry.j
+s:7363:49)
+    at CallExpression.bind (file:///C:/Users/danst/IMU%20Connect%2
+0App/imu-connect/node_modules/rollup/dist/es/shared/node-entry.js:
+2813:23)
+    at CallExpression.bind (file:///C:/Users/danst/IMU%20Connect%2
+0App/imu-connect/node_modules/rollup/dist/es/shared/node-entry.js:
+12123:15)[39m

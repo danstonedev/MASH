@@ -1,0 +1,405 @@
+[TDMA] Beacon #1953, offset=11019210 us, state=2
+[TIMING-P99] Process=6769 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (48624/48624)
+[TDMA PACK] Accel(m/s2): X=-0.02 Y=9.85 Z=-0.02 -> int16: X=-1 Y=984 Z=-2
+[TDMA BYTES] sensorId=180 a[]=(0,984,-2) bytes: B4 8D D2 B1 03 00 40 00 00 00 00 00 00 00 00 D8 03 FE FF 00 00 FF FF 05 00 
+[DEBUG] Packets received - BEACON(0x20):2032 SCHEDULE(0x22):44 REG(0x21):0 DATA(0x23):0
+[TS GEN] nodeId=180, beaconAnchor=62020421, sampleIdx=2, ts=62030421 us
+         timeSinceBeacon=8876 us, oldMethod=60585000, diff=1445421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=9771 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=62080421, localMicros=49617479, offset=12462942 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2003, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[I2C OPT] 6 sensors read in 4743 us (790.5 us/sensor)
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2053, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TS GEN] nodeId=180, beaconAnchor=64140421, sampleIdx=2, ts=64150421 us
+         timeSinceBeacon=7816 us, oldMethod=62585000, diff=1565421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=11773 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=64200421, localMicros=51620740, offset=12579681 us
+[TDMA] Beacon #2103, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2153, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TS GEN] nodeId=180, beaconAnchor=66160421, sampleIdx=2, ts=66170421 us
+         timeSinceBeacon=9274 us, oldMethod=64590000, diff=1580421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=13776 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[TDMA] Beacon #2203, offset=11019210 us, state=2
+[BEACON SYNC] nodeId=180, gwMicros=66240421, localMicros=53641802, offset=12598619 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TIMING-P99] Process=6747 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (54726/54726)
+[TDMA PACK] Accel(m/s2): X=0.02 Y=9.82 Z=-0.00 -> int16: X=2 Y=982 Z=0
+[TDMA BYTES] sensorId=180 a[]=(0,980,-1) bytes: B4 25 2D 00 04 00 40 00 00 00 00 00 00 00 00 D4 03 FF FF 00 00 02 [TDMA] Found our slot! offset=1000 us, width=12872 us
+00 FE FF 
+[DEBUG] Packets received - BEACON(0x20):2287 SCHEDULE(0x22):50 REG(0x21):0 DATA(0x23):0
+[TDMA] Beacon #2253, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TS GEN] nodeId=180, beaconAnchor=68180421, sampleIdx=2, ts=68190421 us
+         timeSinceBeacon=10402 us, oldMethod=66590000, diff=1600421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=15780 ms
+[TDMA] Beacon #2303, offset=11019210 us, state=2
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=68260421, localMicros=55642954, offset=12617467 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2353, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2403, offset=11019210 us, state=2
+[TS GEN] nodeId=180, beaconAnchor=70280421, sampleIdx=3, ts=70295421 us
+         timeSinceBeacon=14156 us, oldMethod=68595000, diff=1700421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=17785 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=70360421, localMicros=57644559, offset=12715862 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2453, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2503, offset=11019210 us, state=2
+[TIMING-P99] Process=6641 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (60816/60816)
+[TDMA PACK] Accel(m/s2): X=0.03 Y=9.78 Z=-0.01 -> int16: X=2 Y=978 Z=0
+[TDMA BYTES] sensorId=180 a[]=(0,980,-2) bytes: B4 C5 D3 4F 04 00 40 00 00 00 00 00 00 00 00 D4 03 FE FF 02 00 05 00 07 00 
+[DEBUG] Packets received - BEACON(0x20):2545 SCHEDULE(0x22):55 REG(0x21):0 DATA(0x23):0
+[TS GEN] nodeId=180, beaconAnchor=72380421, sampleIdx=3, ts=72395421 us
+         timeSinceBeacon=16494 us, oldMethod=70600000, diff=1795421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=19789 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=72480421, localMicros=59646182, offset=12834239 us
+[ProtocolTask] Stats: loops=50525, txAttempts=4915, txSuccess=4915
+[I2C OPT] 6 sensors read in 4630 us (771.7 us/sensor)
+[TDMA] Pipeline: Pre-built packet ready for next TX slot
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Beacon #2553, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2603, offset=11019210 us, state=2
+[TS GEN] nodeId=180, beaconAnchor=74420421, sampleIdx=3, ts=74435421 us
+         timeSinceBeacon=18143 us, oldMethod=72605000, diff=1830421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=21791 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=74500421, localMicros=61648678, offset=12851743 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2653, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2703, offset=11019210 us, state=2
+[TS GEN] nodeId=180, beaconAnchor=76440421, sampleIdx=3, ts=76455421 us
+         timeSinceBeacon=18159 us, oldMethod=74605000, diff=1850421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=23793 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=76520421, localMicros=63649349, offset=12871072 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2753, offset=11019210 us, state=2
+[TIMING-P99] Process=6420 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (66918/66918)
+[TDMA PACK] Accel(m/s2): X=-0.01 Y=9.79 Z=-0.02 -> int16: X=-1 Y=978 Z=-1
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA BYTES] sensorId=180 a[]=(1,984,-1) bytes: B4 85 57 9D 04 00 40 00 00 00 00 00 00 01 00 D8 03 FF FF 00 00 04 00 01 00 
+[DEBUG] Packets received - BEACON(0x20):2799 SCHEDULE(0x22):60 REG(0x21):0 DATA(0x23):0
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2803, offset=11019210 us, state=2
+[TS GEN] nodeId=180, beaconAnchor=78520421, sampleIdx=0, ts=78520421 us
+         timeSinceBeacon=34 us, oldMethod=76605000, diff=1915421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=25795 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=78600421, localMicros=65670446, offset=12929975 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2853, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2903, offset=11019210 us, state=2
+[TS GEN] nodeId=180, beaconAnchor=80560421, sampleIdx=0, ts=80560421 us
+         timeSinceBeacon=486 us, oldMethod=78610000, diff=1950421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=27797 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=80640421, localMicros=67671242, offset=12969179 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #2953, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Beacon #3003, offset=11019210 us, state=2
+[TIMING-P99] Process=6543 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (72978/72978)
+[TDMA PACK] Accel(m/s2): X=0.01 Y=9.85 Z=0.01 -> int16: X=1 Y=985 Z=0
+[TDMA BYTES] sensorId=180 a[]=(0,986,0) bytes: B4 F5 88 EC 04 00 40 00 00 00 00 00 00 00 00 DA 03 00 00 02 00 FE FF FE FF 
+[DEBUG] Packets received - BEACON(0x20):3058 SCHEDULE(0x22):65 REG(0x21):0 DATA(0x23):0
+[TS GEN] nodeId=180, beaconAnchor=82700421, sampleIdx=0, ts=82700421 us
+         timeSinceBeacon=579 us, oldMethod=80615000, diff=2085421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=29801 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=82780421, localMicros=69677049, offset=13103372 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[I2C OPT] 6 sensors read in 4600 us (766.7 us/sensor)
+[TDMA] Beacon #3053, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3103, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TS GEN] nodeId=180, beaconAnchor=84740421, sampleIdx=1, ts=84745421 us
+         timeSinceBeacon=2819 us, oldMethod=82620000, diff=2125421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=31806 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=84820421, localMicros=71678242, offset=13142179 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3153, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3203, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TS GEN] nodeId=180, beaconAnchor=86760421, sampleIdx=1, ts=86765421 us
+         timeSinceBeacon=6099 us, oldMethod=84625000, diff=2140421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=33811 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=86840421, localMicros=73680163, offset=13160258 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3254, offset=11019210 us, state=2
+[TIMING-P99] Process=6944 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (79056/79056)
+[TDMA PACK] Accel(m/s2): X=-0.00 Y=9.83 Z=-0.00 -> int16: X=0 Y=983 Z=0
+[TDMA BYTES] sensorId=180 a[]=(-1,977,0) bytes: B4 E5 81 3A 05 00 40 00 00 00 00 00 00 FF FF D1 03 00 00 FF FF FE FF 02 00 
+[DEBUG] Packets received - BEACON(0x20):3307 SCHEDULE(0x22):70 REG(0x21):0 DATA(0x23):0
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3304, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TS GEN] nodeId=180, beaconAnchor=88780421, sampleIdx=2, ts=88790421 us
+         timeSinceBeacon=8704 us, oldMethod=86625000, diff=2165421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=35814 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=88880421, localMicros=75700118, offset=13180303 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3354, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3404, offset=11019210 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TS GEN] nodeId=180, beaconAnchor=90860421, sampleIdx=1, ts=90865421 us
+         timeSinceBeacon=7445 us, oldMethod=88625000, diff=2240421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=37816 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=90960421, localMicros=77702504, offset=13257917 us
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3454, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[TDMA] Beacon #3504, offset=11019210 us, state=2
+[TIMING-P99] Process=6762 us, Build=0 us, AirTime=0 us
+[DIAG OPT] I2C success: 100.0% (85098/85098)
+[TDMA PACK] Accel(m/s2): X=0.01 Y=9.84 Z=0.01 -> int16: X=0 Y=984 Z=0
+[TDMA BYTES] sensorId=180 a[]=(-3,979,0) bytes: B4 5D FF 8A 05 00 40 00 00 00 00 00 00 FD FF D3 03 00 00 00 00 00 00 F1 FF 
+[DEBUG] Packets received - BEACON(0x20):3569 SCHEDULE(0x22):75 REG(0x21):0 DATA(0x23):0
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TS GEN] nodeId=180, beaconAnchor=93060421, sampleIdx=1, ts=93065421 us
+         timeSinceBeacon=5970 us, oldMethod=90630000, diff=2435421 us
+         PTP: offset=11019210 us, RTT=6715 us, age=39820 ms
+[TDMA] Found our slot! offset=1000 us, width=12872 us
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=180, gwMicros=93160421, localMicros=79708666, offset=13451755 us
+[TDMA] Beacon #3554, offset=11019210 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TS GEN] nodeId=204, beaconAnchor=109180421, sampleIdx=1, ts=109185421 us
+         timeSinceBeacon=6411 us, oldMethod=106325000, diff=2860421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=24268 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=109220421, localMicros=89729360, offset=19491061 us
+[TDMA] Beacon #4356, offset=16633094 us, state=2
+[ProtocolTask] Stats: loops=84536, txAttempts=5348, txSuccess=5348
+[ICM20649] Raw int16: accel=[1537,-278,3777] gyro=[1,6,-10]
+[ICM20649] Scales: accel=0.000244 g/LSB, gyro=0.001065 rad/s/LSB
+[TIMING-P99] Process=1374 us, Build=0 us, AirTime=0 us
+[DIAG] I2C success: 100.0% (17781/17781)
+[DIAG S0] scale=0.9977, accelBias=[-3.674,-0.800,0.659], gyroBias=[-0.0013,-0.0111,-0.0059]
+[TDMA PACK] Accel(m/s2): X=-0.02 Y=9.81 Z=0.01 -> int16: X=-2 Y=980 Z=0
+[TDMA BYTES] sensorId=204 a[]=(-2,980,0) bytes: CC 1D 9E 8F 06 00 40 00 00 00 00 00 00 FE FF D4 03 00 00 00 00 FE FF 00 00 
+[SYNC] Freewheeling 1 frames (beacon loss)
+[DEBUG] Packets received - BEACON(0x20):4339 SCHEDULE(0x22):91 REG(0x21):0 DATA(0x23):0
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4406, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TS GEN] nodeId=204, beaconAnchor=111220421, sampleIdx=2, ts=111230421 us
+         timeSinceBeacon=8223 us, oldMethod=108330000, diff=2900421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=26273 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=111260421, localMicros=91730447, offset=19529974 us
+[TDMA] Beacon #4456, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Beacon #4506, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Pipeline: Pre-built packet ready for next TX slot
+[TDMA] Beacon #4556, offset=16633094 us, state=2
+[TS GEN] nodeId=204, beaconAnchor=113260421, sampleIdx=2, ts=113270421 us
+         timeSinceBeacon=12213 us, oldMethod=110335000, diff=2935421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=28278 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=113300421, localMicros=93731788, offset=19568633 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4606, offset=16633094 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[ICM20649] Raw int16: accel=[1528,-274,3767] gyro=[4,9,-15]
+[ICM20649] Scales: accel=0.000244 g/LSB, gyro=0.001065 rad/s/LSB
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TIMING-P99] Process=1921 us, Build=0 us, AirTime=0 us
+[DIAG] I2C success: 100.0% (18782/18782)
+[DIAG S0] scale=0.9977, accelBias=[-3.668,-0.800,0.657], gyroBias=[-0.0011,-0.0114,-0.0053]
+[TDMA PACK] Accel(m/s2): X=0.02 Y=9.82 Z=-0.02 -> int16: X=1 Y=981 Z=-1
+[TDMA BYTES] sensorId=204 a[]=(1,981,-1) bytes: CC 7D A8 DE 06 00 40 00 00 00 00 00 00 01 00 D5 03 FF FF 01 00 00 00 00 00 
+[TDMA] Beacon #4656, offset=16633094 us, state=2
+[DEBUG] Packets received - BEACON(0x20):4593 SCHEDULE(0x22):97 REG(0x21):0 DATA(0x23):0
+[TS GEN] nodeId=204, beaconAnchor=115360421, sampleIdx=3, ts=115375421 us
+         timeSinceBeacon=14125 us, oldMethod=112340000, diff=3035421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=30283 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=115400421, localMicros=95734357, offset=19666064 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4706, offset=16633094 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4756, offset=16633094 us, state=2
+[TS GEN] nodeId=204, beaconAnchor=117400421, sampleIdx=3, ts=117415421 us
+         timeSinceBeacon=19532 us, oldMethod=114345000, diff=3070421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=32288 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=117440421, localMicros=97735531, offset=19704890 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4806, offset=16633094 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4856, offset=16633094 us, state=2
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[TS GEN] nodeId=204, beaconAnchor=119480421, sampleIdx=0, ts=119480421 us
+         timeSinceBeacon=2113 us, oldMethod=116350000, diff=3130421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=34293 ms
+[BEACON SYNC] nodeId=204, gwMicros=119500421, localMicros=99739311, offset=19761110 us
+[ICM20649] Raw int16: accel=[1529,-278,3781] gyro=[1,5,-8]
+[ICM20649] Scales: accel=0.000244 g/LSB, gyro=0.001065 rad/s/LSB
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4906, offset=16633094 us, state=2
+[TIMING-P99] Process=1932 us, Build=0 us, AirTime=0 us
+[DIAG] I2C success: 100.0% (19783/19783)
+[DIAG S0] scale=0.9974, accelBias=[-3.661,-0.800,0.656], gyroBias=[-0.0012,-0.0117,-0.0057]
+[TDMA PACK] Accel(m/s2): X=-0.01 Y=9.81 Z=0.00 -> int16: X=0 Y=981 Z=0
+[TDMA BYTES] sensorId=204 a[]=(0,981,0) bytes: CC 5D 7A 2C 07 00 40 00 00 00 00 00 00 00 00 D5 03 00 00 01 00 00 00 00 00 
+[DEBUG] Packets received - BEACON(0x20):4848 SCHEDULE(0x22):102 REG(0x21):0 DATA(0x23):0
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #4956, offset=16633094 us, state=2
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[TS GEN] nodeId=204, beaconAnchor=121500421, sampleIdx=0, ts=121500421 us
+         timeSinceBeacon=800 us, oldMethod=118350000, diff=3150421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=36293 ms
+[BEACON SYNC] nodeId=204, gwMicros=121540421, localMicros=101759892, offset=19780529 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5006, offset=16633094 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5056, offset=16633094 us, state=2
+[TS GEN] nodeId=204, beaconAnchor=123520421, sampleIdx=3, ts=123535421 us
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+         timeSinceBeacon=19434 us, oldMethod=120355000, diff=3180421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=38298 ms
+[BEACON SYNC] nodeId=204, gwMicros=123580421, localMicros=103764216, offset=19816205 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5106, offset=16633094 us, state=2
+[ICM20649] Raw int16: accel=[1525,-274,3778] gyro=[4,4,-13]
+[ICM20649] Scales: accel=0.000244 g/LSB, gyro=0.001065 rad/s/LSB
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5156, offset=16633094 us, state=2
+[TIMING-P99] Process=1854 us, Build=0 us, AirTime=0 us
+[DIAG] I2C success: 100.0% (20784/20784)
+[DIAG S0] scale=0.9971, accelBias=[-3.659,-0.800,0.652], gyroBias=[-0.0016,-0.0114,-0.0055]
+[TDMA PACK] Accel(m/s2): X=0.00 Y=9.83 Z=-0.02 -> int16: X=0 Y=983 Z=-1
+[TDMA BYTES] sensorId=204 a[]=(0,983,-1) bytes: CC 5D 9A 7A 07 00 40 00 00 00 00 00 00 00 00 D7 03 FF FF 02 00 FD FF 00 00 
+[SYNC] Freewheeling 1 frames (beacon loss)
+[DEBUG] Packets received - BEACON(0x20):5097 SCHEDULE(0x22):107 REG(0x21):0 DATA(0x23):0
+[TS GEN] nodeId=204, beaconAnchor=125600421, sampleIdx=1, ts=125605421 us
+         timeSinceBeacon=5054 us, oldMethod=122360000, diff=3245421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=40303 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=125680421, localMicros=105784342, offset=19896079 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5206, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5256, offset=16633094 us, state=2
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] BUFFER OVERFLOW (LIVE)! Dropped OLDEST sample to maintain latency.
+[TS GEN] nodeId=204, beaconAnchor=127640421, sampleIdx=1, ts=127645421 us
+         timeSinceBeacon=5715 us, oldMethod=124360000, diff=3285421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=42303 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=127700421, localMicros=107786161, offset=19914260 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5306, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5356, offset=16633094 us, state=2
+[TS GEN] nodeId=204, beaconAnchor=129660421, sampleIdx=2, ts=129670421 us
+         timeSinceBeacon=9621 us, oldMethod=126365000, diff=3305421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=44308 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=129740421, localMicros=109806940, offset=19933481 us
+[ICM20649] Raw int16: accel=[1529,-274,3778] gyro=[1,7,-11]
+[ICM20649] Scales: accel=0.000244 g/LSB, gyro=0.001065 rad/s/LSB
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5406, offset=16633094 us, state=2
+[TIMING-P99] Process=1789 us, Build=0 us, AirTime=0 us
+[DIAG] I2C success: 100.0% (21785/21785)
+[DIAG S0] scale=0.9967, accelBias=[-3.656,-0.800,0.649], gyroBias=[-0.0020,-0.0111,-0.0059]
+[TDMA PACK] Accel(m/s2): X=0.01 Y=9.82 Z=-0.00 -> int16: X=0 Y=981 Z=0
+[TDMA BYTES] sensorId=204 a[]=(0,980,-1) bytes: CC FD CF C7 07 00 40 00 00 00 00 00 00 00 00 D4 03 FF FF 02 00 00 00 00 00 
+[DEBUG] Packets received - BEACON(0x20):5350 SCHEDULE(0x22):112 REG(0x21):0 DATA(0x23):0
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5456, offset=16633094 us, state=2
+[TS GEN] nodeId=204, beaconAnchor=131700421, sampleIdx=3, ts=131715421 us
+         timeSinceBeacon=13502 us, oldMethod=128370000, diff=3345421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=46313 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=131780421, localMicros=111807776, offset=19972645 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5506, offset=16633094 us, state=2
+[TDMA] BUFFER OVERFLOW (LIVE)! Dropped OLDEST sample to maintain latency.
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5556, offset=16633094 us, state=2
+[TS GEN] nodeId=204, beaconAnchor=133720421, sampleIdx=3, ts=133735421 us
+         timeSinceBeacon=16490 us, oldMethod=130375000, diff=3360421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=48318 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=133840421, localMicros=113809453, offset=20030968 us
+[SYNC] Freewheeling 1 frames (beacon loss)
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5606, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[ICM20649] Raw int16: accel=[1506,-260,3768] gyro=[1,5,-12]
+[ICM20649] Scales: accel=0.000244 g/LSB, gyro=0.001065 rad/s/LSB
+[TDMA] Beacon #5656, offset=16633094 us, state=2
+[TIMING-P99] Process=1718 us, Build=0 us, AirTime=0 us
+[DIAG] I2C success: 100.0% (22786/22786)
+[DIAG S0] scale=0.9967, accelBias=[-3.645,-0.800,0.649], gyroBias=[-0.0014,-0.0112,-0.0054]
+[TDMA PACK] Accel(m/s2): X=0.00 Y=9.80 Z=0.00 -> int16: X=0 Y=979 Z=0
+[TDMA BYTES] sensorId=204 a[]=(0,981,0) bytes: CC 1D 3E 16 08 00 40 00 00 00 00 00 00 00 00 D5 03 00 00 02 00 00 00 FE FF 
+[DEBUG] Packets received - BEACON(0x20):5606 SCHEDULE(0x22):117 REG(0x21):0 DATA(0x23):0
+[TS GEN] nodeId=204, beaconAnchor=135800421, sampleIdx=3, ts=135815421 us
+         timeSinceBeacon=19589 us, oldMethod=132380000, diff=3435421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=50323 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=135880421, localMicros=115812061, offset=20068360 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5706, offset=16633094 us, state=2
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5756, offset=16633094 us, state=2
+[TDMA] BUFFER OVERFLOW (LIVE)! Dropped OLDEST sample to maintain latency.
+[TS GEN] nodeId=204, beaconAnchor=137860421, sampleIdx=1, ts=137865421 us
+         timeSinceBeacon=3730 us, oldMethod=134385000, diff=3480421 us
+         PTP: offset=16633094 us, RTT=6825 us, age=52328 ms
+[BEACON FLAGS] raw=0x32, state=3, reset=0, version=2
+[BEACON SYNC] nodeId=204, gwMicros=137920421, localMicros=117813097, offset=20107324 us
+[TDMA] Found our slot! offset=13972 us, width=8000 us
+[TDMA] Beacon #5806, offset=16633094 us, state=2
+[TDMA] WARNING: Our nodeId 204 not found in schedule!
+[TDMA] Sent registration: nodeId=204, sensorCount=1, powerState=2, sampleRate=200Hz
+[TDMA] Schedule received: 1 nodes, our nodeId=204
+[TDMA]   Schedule slot 0: nodeId=180, offset=1000, width=12872
+[TDMA] WARNING: Our nodeId 204 not found in schedule!
+[TDMA] Beacon #5856, offset=16633094 us, state=1
+[TDMA] Sent registration: nodeId=204, sensorCount=1, powerState=2, sampleRate=200Hz

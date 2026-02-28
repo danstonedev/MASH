@@ -1,0 +1,94 @@
+{
+    "session": {
+        "id": "repro_session_001",
+        "name": "Repro Session",
+        "startTime": 1700000000000,
+        "endTime": 1700000005000,
+        "sensorCount": 1,
+        "sensorMapping": {
+            "1": "thigh_r"
+        },
+        "calibrationOffsets": [
+            {
+                "segmentId": "thigh_r",
+                "offset": [
+                    1,
+                    0,
+                    0,
+                    0
+                ],
+                "quality": 100,
+                "method": "single-pose",
+                "capturedAt": 1700000000000
+            }
+        ],
+        "tareStates": [
+            {
+                "segmentId": "thigh_r",
+                "mountingTare": [
+                    1,
+                    0,
+                    0,
+                    0
+                ],
+                "headingTare": [
+                    1,
+                    0,
+                    0,
+                    0
+                ],
+                "jointTare": {
+                    "flexion": 0,
+                    "abduction": 0,
+                    "rotation": 0
+                },
+                "mountingTareTime": 1700000000000,
+                "headingTareTime": 1700000000000,
+                "jointTareTime": 0
+            }
+        ],
+        "sampleRate": 60
+    },
+    "frames": [
+        {
+            "sensorId": 1,
+            "timestamp": 1700000000000,
+            "quaternion": [
+                1,
+                0,
+                0,
+                0
+            ],
+            "accelerometer": [
+                0,
+                9.81,
+                0
+            ],
+            "gyro": [
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "sensorId": 1,
+            "timestamp": 1700000001000,
+            "quaternion": [
+                0.707,
+                0.707,
+                0,
+                0
+            ],
+            "accelerometer": [
+                0,
+                0,
+                9.81
+            ],
+            "gyro": [
+                0,
+                0,
+                0
+            ]
+        }
+    ]
+}

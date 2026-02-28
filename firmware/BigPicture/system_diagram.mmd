@@ -1,0 +1,40 @@
+```mermaid
+flowchart TB
+    subgraph Physical["Physical Layer"]
+        direction LR
+        A["Node A<br/>Upper Body<br/>(5 IMU + Mag + Baro)"]
+        B["Node B<br/>Lower Body<br/>(5 IMU)"]
+        C["Node C<br/>Left Boot<br/>(1 IMU)"]
+        D["Node D<br/>Right Boot<br/>(1 IMU)"]
+    end
+
+    subgraph Transport["Transport Layer"]
+        direction TB
+        ESPNOW["ESP-NOW<br/>20Hz Sync + TDMA"]
+        BLE["BLE 5.0<br/>MTU 512"]
+        WIFI["WiFi/WebSocket<br/>Port 81"]
+    end
+
+    subgraph WebApp["Web Application"]
+        direction TB
+        REG["Device Registry<br/>useDeviceRegistry.ts"]
+        CAL["Calibration Store<br/>useCalibrationStore.ts"]
+        SKEL["Skeleton Model<br/>SkeletonModel.tsx"]
+        BONE["Bone Mapping<br/>boneMapping.ts"]
+    end
+
+    A --> ESPNOW
+    B --> ESPNOW
+    C --> ESPNOW
+    D --> ESPNOW
+    
+    ESPNOW --> BLE
+    ESPNOW --> WIFI
+    
+    BLE --> REG
+    WIFI --> REG
+    
+    REG --> CAL
+    CAL --> SKEL
+    BONE --> SKEL
+```

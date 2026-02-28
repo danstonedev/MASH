@@ -1,0 +1,75 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e6]
+      - heading "IMUConnect" [level=1] [ref=e8]
+    - button "Open help documentation" [ref=e9]:
+      - img [ref=e10]
+      - generic [ref=e13]: Help
+  - generic [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - button "Connect panel" [ref=e17]:
+          - img [ref=e18]
+          - generic [ref=e20]: Connect
+        - button "Demo panel" [ref=e21]:
+          - img [ref=e22]
+          - generic [ref=e24]: Demo
+        - button "Playback panel" [ref=e25]:
+          - img [ref=e26]
+          - generic [ref=e30]: Playback
+        - button "Athletes panel" [ref=e31]:
+          - img [ref=e32]
+          - generic [ref=e37]: Athletes
+        - button "Analyze panel" [ref=e38]:
+          - img [ref=e39]
+          - generic [ref=e41]: Analyze
+        - button "GRF panel" [ref=e42]:
+          - img [ref=e43]
+          - generic [ref=e45]: GRF
+        - button "Export panel" [ref=e46]:
+          - img [ref=e47]
+          - generic [ref=e50]: Export
+        - button "Research panel" [ref=e51]:
+          - img [ref=e52]
+          - generic [ref=e54]: Research
+        - button "Debug panel" [ref=e55]:
+          - img [ref=e56]
+          - generic [ref=e65]: Debug
+        - button "Dev panel" [ref=e66]:
+          - img [ref=e67]
+          - generic [ref=e70]: Dev
+        - button "Settings panel" [active] [ref=e71]:
+          - img [ref=e72]
+          - generic [ref=e75]: Settings
+      - generic [ref=e77]:
+        - generic [ref=e79]:
+          - img [ref=e80]
+          - generic [ref=e83]: Settings
+        - generic [ref=e85]:
+          - generic [ref=e86]:
+            - img [ref=e87]
+            - generic [ref=e91]: Protocol
+          - generic [ref=e92]:
+            - button "BLE" [ref=e93]:
+              - img [ref=e94]
+              - text: BLE
+            - button "WiFi" [ref=e96]:
+              - img [ref=e97]
+              - text: WiFi
+    - main [ref=e101]:
+      - generic [ref=e104]:
+        - generic:
+          - generic:
+            - generic: Left Drag
+            - text: Rotate
+          - generic:
+            - generic: Right Drag
+            - text: Pan
+          - generic:
+            - generic: Scroll
+            - text: Zoom
+```

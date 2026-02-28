@@ -1,0 +1,44 @@
+{
+  "routes": [
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/*",
+      "serve": "/index.html",
+      "statusCode": 200
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/assets/*",
+      "/api/*",
+      "*.{css,js,svg,png,jpg,jpeg,gif,ico,woff,woff2}"
+    ]
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "accelerometer=(self), gyroscope=(self), magnetometer=(self), bluetooth=(self), camera=(), microphone=()",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.azure-api.net wss://*.webpubsub.azure.com blob:; worker-src 'self' blob:; frame-ancestors 'none'"
+  },
+  "mimeTypes": {
+    ".json": "application/json",
+    ".wasm": "application/wasm",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json"
+  },
+  "responseOverrides": {
+    "404": {
+      "rewrite": "/index.html",
+      "statusCode": 200
+    }
+  },
+  "platform": {
+    "apiRuntime": "node:20"
+  }
+}

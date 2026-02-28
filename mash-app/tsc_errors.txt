@@ -1,0 +1,65 @@
+﻿src/analysis/DistanceTracker.ts(88,13): error TS6133: 'activityType' is declared but its value is never read.
+src/analysis/DistanceTracker.ts(99,13): error TS6133: 'integratedDistance' is declared but its value is never read.
+src/analysis/DistanceTracker.ts(168,18): error TS6133: 'deltaTime' is declared but its value is never read.
+src/analysis/GaitAnalyzer.ts(63,7): error TS6133: 'SAMPLE_RATE' is declared but its value is never read.
+src/analysis/LowerBodyIK.ts(53,13): error TS6133: '_v2' is declared but its value is never read.
+src/analysis/LowerBodyIK.ts(54,13): error TS6133: '_v3' is declared but its value is never read.
+src/analysis/LowerBodyIK.ts(55,13): error TS6133: '_q1' is declared but its value is never read.
+src/analysis/LowerBodyIK.ts(56,13): error TS6133: '_q2' is declared but its value is never read.
+src/analysis/LowerBodyIK.ts(121,107): error TS6133: 'isRight' is declared but its value is never read.
+src/analysis/SkateAnalyzer.ts(16,29): error TS6133: 'deviceQuaternionCache' is declared but its value is never read.
+src/analysis/SkateAnalyzer.ts(80,7): error TS6133: 'GYRO_CONTACT_THRESHOLD' is declared but its value is never read.
+src/analysis/SkateAnalyzer.ts(86,7): error TS6133: 'MIN_GLIDE_TIME_MS' is declared but its value is never read.
+src/analysis/SkateAnalyzer.ts(90,7): error TS6133: 'SAMPLE_RATE' is declared but its value is never read.
+src/analysis/SkateAnalyzer.ts(99,13): error TS6133: 'gyroBufferPelvis' is declared but its value is never read.
+src/biomech/topology/SensorRoles.ts(8,13): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+src/biomech/topology/SensorRoles.ts(47,13): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+src/calibration/score.ts(223,11): error TS6133: 'numEq' is declared but its value is never read.
+src/calibration/TopologyDetector.ts(297,5): error TS6133: 'scoreJoints' is declared but its value is never read.
+src/components/athletes/AthleteProfileForm.tsx(9,20): error TS6133: 'useEffect' is declared but its value is never read.
+src/components/athletes/AthleteProfileForm.tsx(11,27): error TS6133: 'Scale' is declared but its value is never read.
+src/components/athletes/TeamDashboard.tsx(16,73): error TS6133: 'Sport' is declared but its value is never read.
+src/components/athletes/TeamDashboard.tsx(111,11): error TS6133: 'activeTeam' is declared but its value is never read.
+src/components/comparison/ComparisonView.tsx(11,29): error TS6133: 'useCallback' is declared but its value is never read.
+src/components/comparison/ComparisonView.tsx(191,11): error TS6133: 'seekBoth' is declared but its value is never read.
+src/components/config/TopologyConfigView.tsx(53,44): error TS6133: 'd' is declared but its value is never read.
+src/components/config/TopologyConfigView.tsx(225,61): error TS6133: 'roles' is declared but its value is never read.
+src/components/firmware/FirmwareUpdate.tsx(31,13): error TS2339: Property 'connectionManager' does not exist on type 'DeviceState'.
+src/components/settings/FirmwareUpdateCard.tsx(10,47): error TS6133: 'Wifi' is declared but its value is never read.
+src/components/timeline/EventAnnotationPanel.tsx(15,5): error TS6133: 'Copy' is declared but its value is never read.
+src/components/timeline/EventAnnotationPanel.tsx(15,17): error TS6133: 'Trash2' is declared but its value is never read.
+src/components/timeline/EventAnnotationPanel.tsx(49,11): error TS6133: 'removeAnnotation' is declared but its value is never read.
+src/components/timeline/SessionTimeline.tsx(20,10): error TS6133: 'TrackType' is declared but its value is never read.
+src/components/timeline/SessionTimeline.tsx(73,11): error TS6133: 'setViewRange' is declared but its value is never read.
+src/components/timeline/SessionTimeline.tsx(78,11): error TS6133: 'isPlaying' is declared but its value is never read.
+src/components/ui/AnalysisPanel.tsx(12,10): error TS2305: Module '"../../lib/db"' has no exported member 'db'.
+src/components/ui/MovementCard.tsx(13,20): error TS2307: Cannot find module '../../lib/cn' or its corresponding type declarations.
+src/components/ui/MovementCard.tsx(17,5): error TS6133: 'Timer' is declared but its value is never read.
+src/components/ui/MovementCard.tsx(18,5): error TS6133: 'Target' is declared but its value is never read.
+src/components/ui/SensorAssignmentPanel.tsx(105,22): error TS2554: Expected 1 arguments, but got 0.
+src/components/ui/SessionManager.tsx(3,10): error TS2305: Module '"../../lib/db/index"' has no exported member 'db'.
+src/components/visualization/DigitalMannequin.tsx(1,8): error TS6133: 'React' is declared but its value is never read.
+src/components/visualization/DigitalMannequin.tsx(1,17): error TS6133: 'useEffect' is declared but its value is never read.
+src/components/visualization/DigitalMannequin.tsx(132,29): error TS6133: 'role' is declared but its value is never read.
+src/components/visualization/SingleSensorView.tsx(53,46): error TS6133: 'u' is declared but its value is never read.
+src/components/visualization/SingleSensorView.tsx(78,17): error TS2322: Type '(u: uPlot, min: number, max: number) => number[]' is not assignable to type 'Range | undefined'.
+  Type '(u: uPlot, min: number, max: number) => number[]' is not assignable to type 'Function'.
+    Type 'number[]' is not assignable to type 'MinMax'.
+      Target requires 2 element(s) but source may have fewer.
+src/lib/analysis/derived.ts(1,10): error TS2305: Module '"../db"' has no exported member 'db'.
+src/lib/connection/BLEConnection.ts(4,1): error TS6133: 'useCalibrationStore' is declared but its value is never read.
+src/lib/export/opensimExport.ts(23,10): error TS2305: Module '"../db"' has no exported member 'db'.
+src/lib/export/opensimExport.ts(75,7): error TS6133: 'JOINT_COLUMNS' is declared but its value is never read.
+src/lib/export/opensimExport.ts(145,20): error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/lib/export/opensimExport.ts(184,52): error TS2339: Property 'segment' does not exist on type 'RecordedFrame'.
+src/lib/export/opensimExport.ts(346,29): error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/lib/fusion/ExtendedKalmanFilter.ts(29,1): error TS6133: 'THREE' is declared but its value is never read.
+src/lib/validation/driftCharacterization.ts(17,32): error TS6133: 'DriftState' is declared but its value is never read.
+src/lib/validation/mocapComparison.ts(137,11): error TS6133: 'numFrames' is declared but its value is never read.
+src/lib/validation/mocapComparison.ts(138,11): error TS6133: 'numMarkers' is declared but its value is never read.
+src/lib/validation/mocapComparison.ts(198,5): error TS6133: 'maxOffset' is declared but its value is never read.
+src/store/useComparisonStore.ts(12,1): error TS6133: 'THREE' is declared but its value is never read.
+src/store/useNetworkStore.ts(136,21): error TS2353: Object literal may only specify known properties, and 'sensorCount' does not exist in type 'NodeInfo'.
+src/store/useNetworkStore.ts(156,31): error TS2345: Argument of type 'NodeInfo | undefined' is not assignable to parameter of type 'NodeInfo'.
+  Type 'undefined' is not assignable to type 'NodeInfo'.
+src/tests/calibrationMath.test.ts(302,25): error TS6133: 'joint' is declared but its value is never read.

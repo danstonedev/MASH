@@ -1,0 +1,406 @@
+﻿
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90mC:/Users/danst/IMU Connect App/imu-connect[39m
+
+ [32mΓ£ô[39m src/components/visualization/skeleton/__tests__/FootContactDetector.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [31mΓ¥»[39m src/tests/coordinateFramePipeline.test.ts [2m([22m[2m14 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 19[2mms[22m[39m
+       [32mΓ£ô[39m should convert identity correctly[32m 2[2mms[22m[39m
+       [32mΓ£ô[39m should preserve rotation magnitude during conversion[32m 1[2mms[22m[39m
+[31m       [31m├ù[31m should round-trip correctly[39m[32m 7[2mms[22m[39m
+       [32mΓ£ô[39m should produce target orientation when sensor unchanged[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should track relative motion after calibration[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should handle pelvis (root bone) correctly[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should handle thigh (child bone) with local target[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should give 100% quality for perfect alignment[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should degrade linearly with angular error[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should correctly calibrate and animate a segment[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should preserve kinematic chain relationships[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should handle gimbal lock gracefully[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should handle quaternion double-cover (q = -q)[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should maintain unit quaternion after operations[32m 0[2mms[22m[39m
+ [31mΓ¥»[39m src/components/visualization/skeleton/__tests__/OrientationProcessor.test.ts [2m([22m[2m12 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 24[2mms[22m[39m
+       [32mΓ£ô[39m processes quaternion even when no calibration data is provided[32m 3[2mms[22m[39m
+       [32mΓ£ô[39m applies calibration offset correctly[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m uses stored calibration in playback mode[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m processes quaternion with mounting rotation option (not currently used in pipeline)[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m applies anatomical constraints for out-of-range joints[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m returns result when logging option is provided[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m applies world orientation directly to bone (root bone)[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m applies orientation to bone with parent correctly (no instability)[32m 2[2mms[22m[39m
+       [32mΓ£ô[39m clamps knee hyperextension beyond physiological limits[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m clamps excessive knee flexion beyond physiological limits[32m 1[2mms[22m[39m
+[31m       [31m├ù[31m allows normal knee flexion within limits[39m[32m 9[2mms[22m[39m
+       [32mΓ£ô[39m does not apply constraints to non-mapped segments[32m 1[2mms[22m[39m
+ [31mΓ¥»[39m src/tests/pipelineVerification.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 11[2mms[22m[39m
+[31m     [31m├ù[31m pass-through uncalibrated data correctly[39m[32m 6[2mms[22m[39m
+[31m     [31m├ù[31m applies calibration offset to nullify mounting rotation[39m[32m 2[2mms[22m[39m
+     [32mΓ£ô[39m separates raw and calibrated stages[32m 1[2mms[22m[39m
+ [31mΓ¥»[39m src/tests/calibrationMath.test.ts [2m([22m[2m28 tests[22m[2m | [22m[31m4 failed[39m[2m)[22m[32m 29[2mms[22m[39m
+       [32mΓ£ô[39m should compute identity offset when sensor matches target[32m 2[2mms[22m[39m
+       [32mΓ£ô[39m should compute 90┬░ offset when sensor is rotated[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should correctly invert and apply offset[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should work for runtime motion after calibration[32m 1[2mms[22m[39m
+[31m       [31m├ù[31m should compute tilt offset from T-pose[39m[32m 7[2mms[22m[39m
+[31m       [31m├ù[31m should correct heading from N-pose[39m[32m 1[2mms[22m[39m
+[31m       [31m├ù[31m should produce higher quality than single-pose for heading errors[39m[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should give 100% quality for perfect alignment[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should degrade quality with angular error[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should warn for high angular error[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should assess sensor stability from samples[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should identify X-axis rotation from angular velocity[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should identify Z-axis rotation from angular velocity[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should return low confidence for insufficient data[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should convert IMU to Three.js frame[32m 0[2mms[22m[39m
+[31m       [31m├ù[31m should round-trip convert correctly[39m[32m 3[2mms[22m[39m
+       [32mΓ£ô[39m should have limits defined for major joints[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should have valid min < max for all limits[32m 1[2mms[22m[39m
+       [32mΓ£ô[39m should not modify pose within limits[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should softly constrain pose exceeding limits[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should return unchanged for unknown joint[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should clamp to exact limits[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should not modify pose within limits[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should validate pose within limits[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should invalidate pose exceeding limits[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should consider tolerance[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should return 0 for valid pose[32m 0[2mms[22m[39m
+       [32mΓ£ô[39m should increase with violation magnitude[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m src/components/visualization/skeleton/__tests__/FloorGrounder.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/madgwickVerification.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32mΓ£ô[39m src/lib/math/so3.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32mΓ£ô[39m src/calibration/__tests__/CalibrationValidator.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+[90mstdout[2m | src/tests/syntheticMotion.test.ts[2m > [22m[2mSynthetic Hinge Motion Validation[2m > [22m[2mPure Flexion Movement[2m > [22m[2mshould recover 90┬░ flexion from synthetic knee swing
+[22m[39mFinal angles: {
+  flexion: [33m81.2194683012675[39m,
+  abduction: [33m-0[39m,
+  rotation: [33m0[39m,
+  gimbalWarning: [90mundefined[39m
+}
+
+node.exe : [90mstderr[2m | src/tests/syntheticMotion.test.ts[2m > 
+[22m[2mSynthetic Hinge Motion Validation[2m > [22m[2mFilter 
+Robustness[2m > [22m[2mshould reject NaN inputs gracefully
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([90mstderr[2m...put    s 
+gracefully:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[22m[39m[Madgwick] Invalid input (NaN/Infinity), skipping update
+
+[90mstdout[2m | src/tests/syntheticMotion.test.ts[2m > [22m[2mSynthetic Hinge Motion Validation[2m > [22m[2mGimbal Lock Warning[2m > [22m[2mshould warn when near gimbal lock
+[22m[39m85┬░ pitch result: { flexion: [33m85[39m, abduction: [33m0[39m, rotation: [33m-0[39m, gimbalWarning: [90mundefined[39m }
+
+ [32mΓ£ô[39m src/tests/syntheticMotion.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32mΓ£ô[39m src/calibration/PoseCalibration.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mBasic Store State[2m > [22m[2mshould initialize with idle state
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mBasic Store State[2m > [22m[2mshould report not calibrated initially
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mDevice Registry Integration[2m > [22m[2mshould have devices available for calibration
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mDevice Registry Integration[2m > [22m[2mshould have devices available for calibration
+[22m[39m[AssignmentStore] Assigned sensor_0 ΓåÆ PELVIS (pelvis)
+[AssignmentStore] Topology: SINGLE {
+  instrumentTelemetry: [33mfalse[39m,
+  lowerBodyIK: [33mfalse[39m,
+  upperBodyIK: [33mfalse[39m,
+  spineAnalysis: [33mfalse[39m,
+  precisionKnee: [33mfalse[39m,
+  propTracking: [33mfalse[39m
+}
+[AssignmentStore] Assigned sensor_1 ΓåÆ ARM_L (upper_arm_l)
+[AssignmentStore] Topology: SINGLE {
+  instrumentTelemetry: [33mfalse[39m,
+  lowerBodyIK: [33mfalse[39m,
+  upperBodyIK: [33mfalse[39m,
+  spineAnalysis: [33mfalse[39m,
+  precisionKnee: [33mfalse[39m,
+  propTracking: [33mfalse[39m
+}
+[AssignmentStore] Assigned sensor_2 ΓåÆ ARM_R (upper_arm_r)
+[AssignmentStore] Topology: SINGLE {
+  instrumentTelemetry: [33mfalse[39m,
+  lowerBodyIK: [33mfalse[39m,
+  upperBodyIK: [33mfalse[39m,
+  spineAnalysis: [33mfalse[39m,
+  precisionKnee: [33mfalse[39m,
+  propTracking: [33mfalse[39m
+}
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mCalibration Math (Static)[2m > [22m[2mshould produce identity when sensor matches target
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mCalibration Math (Static)[2m > [22m[2mshould correctly apply offset at runtime
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mCalibration Math (Static)[2m > [22m[2mshould track relative motion after calibration
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mapplyUnifiedResults[2m > [22m[2mshould apply unified calibration results to store
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mapplyUnifiedResults[2m > [22m[2mshould apply unified calibration results to store
+[22m[39m[CalibrationStore] Applied unified results: 2 sensors, quality: 92%
+
+ [32mΓ£ô[39m src/tests/calibration.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m Failed Tests 8 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+
+[41m[1m FAIL [22m[49m src/tests/calibrationMath.test.ts[2m > 
+[22mCalibration Math[2m > [22mDual-Pose Calibration[2m > 
+[22mshould compute tilt offset from T-pose
+[31m[1mTypeError[22m: (0 , 
+__vite_ssr_import_2__.computeDualPoseCalibration) is not a function[39m
+[36m [2mΓ¥»[22m 
+src/tests/calibrationMath.test.ts:[2m109:28[22m[39m
+    [90m107| [39m            [35mconst[39m nPoseTarget [33m=[39m 
+[35mnew[39m 
+[33mTHREE[39m[33m.[39m[33mQuaternion[39m()[33m;[39m
+    [90m108| [39m
+    [90m109| [39m            [35mconst[39m result [33m=[39m 
+[34mcomputeDualPoseCalibration[39m(
+    [90m   | [39m                           [31m^[39m
+    [90m110| [39m                tPoseSensor[33m,[39m 
+tPoseTarget[33m,[39m nPoseSensor[33m,[39m nPoseTarget
+    [90m111| [39m            )[33m;[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[1/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/tests/calibrationMath.test.ts[2m > 
+[22mCalibration Math[2m > [22mDual-Pose Calibration[2m > 
+[22mshould correct heading from N-pose
+[31m[1mTypeError[22m: (0 , 
+__vite_ssr_import_2__.computeDualPoseCalibration) is not a function[39m
+[36m [2mΓ¥»[22m 
+src/tests/calibrationMath.test.ts:[2m128:28[22m[39m
+    [90m126| [39m            [35mconst[39m nPoseTarget [33m=[39m 
+[35mnew[39m 
+[33mTHREE[39m[33m.[39m[33mQuaternion[39m()[33m;[39m
+    [90m127| [39m
+    [90m128| [39m            [35mconst[39m result [33m=[39m 
+[34mcomputeDualPoseCalibration[39m(
+    [90m   | [39m                           [31m^[39m
+    [90m129| [39m                tPoseSensor[33m,[39m 
+tPoseTarget[33m,[39m nPoseSensor[33m,[39m nPoseTarget
+    [90m130| [39m            )[33m;[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[2/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/tests/calibrationMath.test.ts[2m > 
+[22mCalibration Math[2m > [22mDual-Pose Calibration[2m > 
+[22mshould produce higher quality than single-pose for heading errors
+[31m[1mTypeError[22m: (0 , 
+__vite_ssr_import_2__.computeDualPoseCalibration) is not a function[39m
+[36m [2mΓ¥»[22m 
+src/tests/calibrationMath.test.ts:[2m145:32[22m[39m
+    [90m143| [39m            [35mconst[39m nPoseTarget [33m=[39m 
+[35mnew[39m 
+[33mTHREE[39m[33m.[39m[33mQuaternion[39m()[33m;[39m
+    [90m144| [39m
+    [90m145| [39m            [35mconst[39m dualResult [33m=[39m 
+[34mcomputeDualPoseCalibration[39m(
+    [90m   | [39m                               [31m^[39m
+    [90m146| [39m                tPoseSensor[33m,[39m 
+tPoseTarget[33m,[39m nPoseSensor[33m,[39m nPoseTarget
+    [90m147| [39m            )[33m;[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[3/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/tests/calibrationMath.test.ts[2m > 
+[22mCalibration Math[2m > [22mCoordinate Frame Conversion[2m > 
+[22mshould round-trip convert correctly
+[31m[1mAssertionError[22m: expected -0.3 to be close to 0.3, 
+received difference is 0.6, but expected 0.0005[39m
+[36m [2mΓ¥»[22m 
+src/tests/calibrationMath.test.ts:[2m279:34[22m[39m
+    [90m277| [39m
+    [90m278| [39m            [34mexpect[39m(backToIMU[[34m0[39m])
+[33m.[39m[34mtoBeCloseTo[39m(original[[34m0[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+    [90m279| [39m            [34mexpect[39m(backToIMU[[34m1[39m])
+[33m.[39m[34mtoBeCloseTo[39m(original[[34m1[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+    [90m   | [39m                                 [31m^[39m
+    [90m280| [39m            [34mexpect[39m(backToIMU[[34m2[39m])
+[33m.[39m[34mtoBeCloseTo[39m(original[[34m2[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+    [90m281| [39m            [34mexpect[39m(backToIMU[[34m3[39m])
+[33m.[39m[34mtoBeCloseTo[39m(original[[34m3[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[4/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/tests/coordinateFramePipeline.test.ts[2m 
+> [22mCoordinate Frame Pipeline[2m > [22mIMU to Three.js Frame 
+Conversion[2m > [22mshould round-trip correctly
+[31m[1mAssertionError[22m: expected -0.3000226525654353 to be close 
+to 0.3000226525654353, received difference is 0.6000453051308706, but 
+expected 0.0005[39m
+[36m [2mΓ¥»[22m 
+src/tests/coordinateFramePipeline.test.ts:[2m82:34[22m[39m
+    [90m 80| [39m            [90m// Should get back the same 
+values[39m
+    [90m 81| [39m            [34mexpect[39m(backToIMU[[34m0[39m])
+[33m.[39m[34mtoBeCloseTo[39m(normalized[[34m0[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+    [90m 82| [39m            [34mexpect[39m(backToIMU[[34m1[39m])
+[33m.[39m[34mtoBeCloseTo[39m(normalized[[34m1[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+    [90m   | [39m                                 [31m^[39m
+    [90m 83| [39m            [34mexpect[39m(backToIMU[[34m2[39m])
+[33m.[39m[34mtoBeCloseTo[39m(normalized[[34m2[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+    [90m 84| [39m            [34mexpect[39m(backToIMU[[34m3[39m])
+[33m.[39m[34mtoBeCloseTo[39m(normalized[[34m3[39m][33m,[39m 
+[34m3[39m)[33m;[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[5/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/tests/pipelineVerification.test.ts[2m > 
+[22mPipelineVerification[2m > [22mpass-through uncalibrated data 
+correctly
+[31m[1mTypeError[22m: Cannot read properties of undefined (reading 
+'equals')[39m
+[36m [2mΓ¥»[22m OrientationProcessor.processQuaternion src/components
+/visualization/skeleton/OrientationProcessor.ts:[2m164:50[22m[39m
+    [90m162| [39m        [90m// This corrects for physical sensor 
+placement on the body[39m
+    [90m163| [39m        // 
+===========================================================ΓÇª
+    [90m164| [39m        if (tareState && 
+!tareState.mountingTare.equals(new THREE.QuatΓÇª
+    [90m   | [39m                                                 
+[31m^[39m
+    [90m165| [39m            result [33m=[39m result[33m.[39m[34m
+clone[39m()[33m.[39m[34mmultiply[39m(tareState[33m.[39mmountingTa
+re)[33m;[39m
+    [90m166| [39m            [35mif[39m (shouldLog) 
+[35mthis[39m[33m.[39m[34mlogEuler[39m([32m'2. L1 
+MountingTare'[39m[33m,[39m result)[33m;[39m
+[90m [2mΓ¥»[22m 
+src/tests/pipelineVerification.test.ts:[2m46:34[22m[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[6/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/tests/pipelineVerification.test.ts[2m > 
+[22mPipelineVerification[2m > [22mapplies calibration offset to 
+nullify mounting rotation
+[31m[1mTypeError[22m: Cannot read properties of undefined (reading 
+'equals')[39m
+[36m [2mΓ¥»[22m OrientationProcessor.processQuaternion src/components
+/visualization/skeleton/OrientationProcessor.ts:[2m164:50[22m[39m
+    [90m162| [39m        [90m// This corrects for physical sensor 
+placement on the body[39m
+    [90m163| [39m        // 
+===========================================================ΓÇª
+    [90m164| [39m        if (tareState && 
+!tareState.mountingTare.equals(new THREE.QuatΓÇª
+    [90m   | [39m                                                 
+[31m^[39m
+    [90m165| [39m            result [33m=[39m result[33m.[39m[34m
+clone[39m()[33m.[39m[34mmultiply[39m(tareState[33m.[39mmountingTa
+re)[33m;[39m
+    [90m166| [39m            [35mif[39m (shouldLog) 
+[35mthis[39m[33m.[39m[34mlogEuler[39m([32m'2. L1 
+MountingTare'[39m[33m,[39m result)[33m;[39m
+[90m [2mΓ¥»[22m 
+src/tests/pipelineVerification.test.ts:[2m84:34[22m[39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[7/8]ΓÄ»[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/visualization/skeleton/__tests_
+_/OrientationProcessor.test.ts[2m > [22mOrientationProcessor[2m > 
+[22mROM Constraints[2m > [22mallows normal knee flexion within limits
+[31m[1mAssertionError[22m: expected 10 to be close to 90, received 
+difference is 80, but expected 0.5[39m
+[36m [2mΓ¥»[22m src/components/visualization/skeleton/__tests__/Orien
+tationProcessor.test.ts:[2m246:32[22m[39m
+    [90m244| [39m
+    [90m245| [39m            [90m// Should be very close to input 
+(no clamping needed)[39m
+    [90m246| [39m            [34mexpect[39m(flexionDeg)[33m.[39m[
+34mtoBeCloseTo[39m([34m90[39m[33m,[39m [34m0[39m)[33m;[39m 
+[90m// Within 1 degree[39m
+    [90m   | [39m                               [31m^[39m
+    [90m247| [39m        })[33m;[39m
+    [90m248| [39m
+
+[31m[2mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»[8/8]ΓÄ»[22m[39m
+
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m Unhandled Errors 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+[31m[1m
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make 
+sure your tests are not affected.[22m[39m
+
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m Unhandled Rejection 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+[31m[1mReferenceError[22m: indexedDB is not defined[39m
+[36m [2mΓ¥»[22m 
+src/calibration/CalibrationLogger.ts:[2m75:29[22m[39m
+
+[2m Test Files [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m8 passed[39m[22m[90m (12)[39m
+[2m      Tests [22m [1m[31m8 failed[39m[22m[2m | [22m[1m[32m119 passed[39m[22m[90m (127)[39m
+[2m     Errors [22m [1m[31m1 error[39m[22m
+[2m   Start at [22m 20:15:27
+[2m   Duration [22m 1.59s[2m (transform 992ms, setup 0ms, import 2.13s, tests 168ms, environment 8.42s)[22m
+
+    [90m 73| [39m    [35mprivate[39m [35masync[39m 
+[34minitDB[39m()[33m:[39m 
+[33mPromise[39m[33m<[39m[35mvoid[39m[33m>[39m {
+    [90m 74| [39m        [35mreturn[39m [35mnew[39m 
+[33mPromise[39m((resolve[33m,[39m reject) [33m=>[39m {
+    [90m 75| [39m            [35mconst[39m request [33m=[39m 
+indexedDB[33m.[39m[34mopen[39m([33mDB_NAME[39m[33m,[39m 
+[33mDB_VERSION[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 76| [39m
+    [90m 77| [39m            request[33m.[39monerror [33m=[39m () 
+[33m=>[39m {
+[90m [2mΓ¥»[22m CalibrationLogger.initDB 
+src/calibration/CalibrationLogger.ts:[2m74:16[22m[39m
+[90m [2mΓ¥»[22m new CalibrationLogger 
+src/calibration/CalibrationLogger.ts:[2m67:14[22m[39m
+[90m [2mΓ¥»[22m 
+src/calibration/CalibrationLogger.ts:[2m360:34[22m[39m
+[90m [2mΓ¥»[22m VitestModuleEvaluator._runInlinedModule ../../IMU%20C
+onnect%20App/imu-connect/node_modules/vitest/dist/module-evaluator.js:[
+2m197:120[22m[39m
+[90m [2mΓ¥»[22m ../../IMU%20Connect%20App/imu-connect/node_modules/vi
+test/dist/module-evaluator.js:[2m108:62[22m[39m
+[90m [2mΓ¥»[22m Traces.$ ../../IMU%20Connect%20App/imu-connect/node_m
+odules/vitest/dist/chunks/traces.U4xDYhzZ.js:[2m115:27[22m[39m
+[90m [2mΓ¥»[22m VitestModuleEvaluator.runInlinedModule ../../IMU%20Co
+nnect%20App/imu-connect/node_modules/vitest/dist/module-evaluator.js:[2
+m108:21[22m[39m
+[90m [2mΓ¥»[22m VitestModuleRunner.directRequest ../../IMU%20Connect%
+20App/imu-connect/node_modules/vite/dist/node/module-runner.js:[2m1146:
+80[22m[39m
+
+[31mThis error originated in "[1msrc/tests/calibration.test.ts[22m" 
+test file. It doesn't mean the error was thrown inside the file itself, 
+but while it was running.[39m
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»Γ
+Ä»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+

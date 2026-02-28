@@ -1,0 +1,16 @@
+{
+    "name": "imu-connect-api",
+    "version": "1.0.0",
+    "description": "Serverless API for IMU Connect",
+    "scripts": {
+        "start": "func start",
+        "test": "echo \"No tests yet\" && exit 0"
+    },
+    "dependencies": {
+        "mssql": "^10.0.1",
+        "@azure/storage-blob": "^12.17.0"
+    },
+    "devDependencies": {
+        "azure-functions-core-tools": "^4.x"
+    }
+}

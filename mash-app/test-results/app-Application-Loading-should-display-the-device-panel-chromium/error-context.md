@@ -1,0 +1,109 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e6]
+      - heading "IMUConnect" [level=1] [ref=e8]
+    - button "Open help documentation" [ref=e9]:
+      - img [ref=e10]
+      - generic [ref=e13]: Help
+  - generic [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - button "Connect panel" [ref=e17]:
+          - img [ref=e18]
+          - generic [ref=e20]: Connect
+        - button "Demo panel" [ref=e21]:
+          - img [ref=e22]
+          - generic [ref=e24]: Demo
+        - button "Playback panel" [ref=e25]:
+          - img [ref=e26]
+          - generic [ref=e30]: Playback
+        - button "Athletes panel" [ref=e31]:
+          - img [ref=e32]
+          - generic [ref=e37]: Athletes
+        - button "Analyze panel" [ref=e38]:
+          - img [ref=e39]
+          - generic [ref=e41]: Analyze
+        - button "GRF panel" [ref=e42]:
+          - img [ref=e43]
+          - generic [ref=e45]: GRF
+        - button "Export panel" [ref=e46]:
+          - img [ref=e47]
+          - generic [ref=e50]: Export
+        - button "Research panel" [ref=e51]:
+          - img [ref=e52]
+          - generic [ref=e54]: Research
+        - button "Debug panel" [ref=e55]:
+          - img [ref=e56]
+          - generic [ref=e65]: Debug
+        - button "Dev panel" [ref=e66]:
+          - img [ref=e67]
+          - generic [ref=e70]: Dev
+        - button "Settings panel" [ref=e71]:
+          - img [ref=e72]
+          - generic [ref=e75]: Settings
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - generic [ref=e80]:
+              - img [ref=e81]
+              - generic [ref=e83]: Quick Start
+            - generic [ref=e84]:
+              - img [ref=e85]
+              - text: Offline
+          - button "Connect Sensors" [ref=e87]:
+            - img [ref=e88]
+            - text: Connect Sensors
+        - generic [ref=e90]:
+          - generic [ref=e91]:
+            - generic [ref=e92]:
+              - generic [ref=e93]: "1"
+              - generic [ref=e94]: Assign Sensors
+            - paragraph [ref=e95]: Connect to assign sensors
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - generic [ref=e98]: "2"
+              - generic [ref=e99]: Calibrate
+            - generic [ref=e101] [cursor=pointer]:
+              - checkbox "Quick Calibration (T-Pose Only)" [ref=e102]
+              - generic [ref=e103]: Quick Calibration (T-Pose Only)
+            - button "Assign sensors first" [disabled]:
+              - img
+              - text: Assign sensors first
+          - generic [ref=e104]:
+            - generic [ref=e105]:
+              - generic [ref=e106]: "3"
+              - generic [ref=e107]: Record Session
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - generic [ref=e110]:
+                  - img [ref=e111]
+                  - text: Recording For Athlete
+                - combobox [ref=e114]:
+                  - option "No athlete (anonymous)" [selected]
+                  - option "Emma Lindberg (Skating)"
+                  - option "Marcus Johansson (Skating)"
+                  - option "Sofia Ekstrom (Skating)"
+                  - option "Jake Morrison (Hockey)"
+                  - option "Tyler Schmidt (Hockey)"
+                  - option "Mia Chen (Hockey)"
+              - button "START RECORDING" [disabled] [ref=e116]:
+                - img [ref=e117]
+                - text: START RECORDING
+              - paragraph [ref=e119]: Connect a device to start recording
+    - main [ref=e120]:
+      - generic [ref=e123]:
+        - generic:
+          - generic:
+            - generic: Left Drag
+            - text: Rotate
+          - generic:
+            - generic: Right Drag
+            - text: Pan
+          - generic:
+            - generic: Scroll
+            - text: Zoom
+```

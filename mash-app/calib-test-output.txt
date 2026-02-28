@@ -1,0 +1,140 @@
+﻿
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90mC:/Users/danst/IMU Connect App/imu-connect[39m
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mBasic Store State[2m > [22m[2mshould initialize with idle state
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mBasic Store State[2m > [22m[2mshould report not calibrated initially
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mDevice Registry Integration[2m > [22m[2mshould have devices available for calibration
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mDevice Registry Integration[2m > [22m[2mshould have devices available for calibration
+[22m[39m[AssignmentStore] Assigned sensor_0 ΓåÆ PELVIS (pelvis)
+[AssignmentStore] Topology: SINGLE {
+  instrumentTelemetry: [33mfalse[39m,
+  lowerBodyIK: [33mfalse[39m,
+  upperBodyIK: [33mfalse[39m,
+  spineAnalysis: [33mfalse[39m,
+  precisionKnee: [33mfalse[39m,
+  propTracking: [33mfalse[39m
+}
+[AssignmentStore] Assigned sensor_1 ΓåÆ ARM_L (upper_arm_l)
+[AssignmentStore] Topology: SINGLE {
+  instrumentTelemetry: [33mfalse[39m,
+  lowerBodyIK: [33mfalse[39m,
+  upperBodyIK: [33mfalse[39m,
+  spineAnalysis: [33mfalse[39m,
+  precisionKnee: [33mfalse[39m,
+  propTracking: [33mfalse[39m
+}
+[AssignmentStore] Assigned sensor_2 ΓåÆ ARM_R (upper_arm_r)
+[AssignmentStore] Topology: SINGLE {
+  instrumentTelemetry: [33mfalse[39m,
+  lowerBodyIK: [33mfalse[39m,
+  upperBodyIK: [33mfalse[39m,
+  spineAnalysis: [33mfalse[39m,
+  precisionKnee: [33mfalse[39m,
+  propTracking: [33mfalse[39m
+}
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mCalibration Math (Static)[2m > [22m[2mshould produce identity when sensor matches target
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mCalibration Math (Static)[2m > [22m[2mshould correctly apply offset at runtime
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mCalibration Math (Static)[2m > [22m[2mshould track relative motion after calibration
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mapplyUnifiedResults[2m > [22m[2mshould apply unified calibration results to store
+[22m[39m[CalibrationStore] Cleared all persisted calibration and mounting data
+[AssignmentStore] Clearing all assignments
+
+[90mstdout[2m | src/tests/calibration.test.ts[2m > [22m[2mCalibration Store[2m > [22m[2mapplyUnifiedResults[2m > [22m[2mshould apply unified calibration results to store
+[22m[39m[CalibrationStore] Applied unified results: 2 sensors, quality: 92%
+
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mBasic Store State[2m > [22mshould initialize with idle state[32m 5[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mBasic Store State[2m > [22mshould report not calibrated initially[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mDevice Registry Integration[2m > [22mshould have devices available for calibration[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mCalibration Math (Static)[2m > [22mshould produce identity when sensor matches target[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mCalibration Math (Static)[2m > [22mshould correctly apply offset at runtime[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mCalibration Math (Static)[2m > [22mshould track relative motion after calibration[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mCalibration Store[2m > [22mapplyUnifiedResults[2m > [22mshould apply unified calibration results to store[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/tests/calibration.test.ts[2m > [22mQuaternion Order Convention[2m > [22mshould correctly convert [w,x,y,z] array to THREE.Quaternion(x,y,z,w)[32m 0[2mms[22m[39m
+node.exe : [31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m Unhandled 
+Errors [49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~
+    + CategoryInfo          : NotSpecified: ([31mΓÄ»ΓÄ»ΓÄ»Γ...» 
+   ΓÄ»ΓÄ»ΓÄ»[39m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[31m[1m
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors 
+to make sure your tests are not affected.[22m[39m
+
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m[1m[41m Unhandled Rejection 
+[49m[22m[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+[31m[1mReferenceError[22m: indexedDB is not defined[39m
+[36m [2mΓ¥»[22m 
+src/calibration/CalibrationLogger.ts:[2m75:29[22m[39m
+    [90m 73| [39m    [35mprivate[39m [35masync[39m 
+[34minitDB[39m()[33m:[39m 
+[33mPromise[39m[33m<[39m[35mvoid[39m[33m>[39m {
+    [90m 74| [39m        [35mreturn[39m [35mnew[39m 
+[33mPromise[39m((resolve[33m,[39m reject) [33m=>[39m {
+    [90m 75| [39m            [35mconst[39m request 
+[33m=[39m 
+indexedDB[33m.[39m[34mopen[39m([33mDB_NAME[39m[33m,[39m 
+[33mDB_VERSION[39m)[33m;[39m
+    [90m   | [39m                            [31m^[39m
+    [90m 76| [39m
+    [90m 77| [39m            request[33m.[39monerror 
+[33m=[39m () [33m=>[39m {
+[90m [2mΓ¥»[22m CalibrationLogger.initDB 
+src/calibration/CalibrationLogger.ts:[2m74:16[22m[39m
+[90m [2mΓ¥»[22m new CalibrationLogger 
+src/calibration/CalibrationLogger.ts:[2m67:14[22m[39m
+[90m [2mΓ¥»[22m 
+src/calibration/CalibrationLogger.ts:[2m360:34[22m[39m
+[90m [2mΓ¥»[22m VitestModuleEvaluator._runInlinedModule ../../
+IMU%20Connect%20App/imu-connect/node_modules/vitest/dist/module-e
+valuator.js:[2m197:120[22m[39m
+[90m [2mΓ¥»[22m ../../IMU%20Connect%20App/imu-connect/node_mod
+ules/vitest/dist/module-evaluator.js:[2m108:62[22m[39m
+[90m [2mΓ¥»[22m Traces.$ ../../IMU%20Connect%20App/imu-connect
+/node_modules/vitest/dist/chunks/traces.U4xDYhzZ.js:[2m115:27[2
+2m[39m
+[90m [2mΓ¥»[22m VitestModuleEvaluator.runInlinedModule ../../I
+MU%20Connect%20App/imu-connect/node_modules/vitest/dist/module-ev
+aluator.js:[2m108:21[22m[39m
+[90m [2mΓ¥»[22m VitestModuleRunner.directRequest ../../IMU%20C
+onnect%20App/imu-connect/node_modules/vite/dist/node/module-runne
+r.js:[2m1146:80[22m[39m
+
+[31mThis error originated in 
+"[1msrc/tests/calibration.test.ts[22m" test file. It doesn't 
+mean the error was thrown inside the file itself, but while it 
+was running.[39m
+[31mΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m     Errors [22m [1m[31m1 error[39m[22m
+[2m   Start at [22m 20:20:44
+[2m   Duration [22m 1.22s[2m (transform 291ms, setup 0ms, import 428ms, tests 19ms, environment 492ms)[22m
+
