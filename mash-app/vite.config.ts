@@ -7,8 +7,7 @@ export default defineConfig({
   build: {
     // Production optimizations
     chunkSizeWarningLimit: 600,
-    sourcemap: false, // Disable sourcemaps in production for smaller bundles
-    // Minification
+    sourcemap: false,
     minify: "esbuild",
     target: "es2020",
   },

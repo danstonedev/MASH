@@ -537,6 +537,12 @@ export function DevicePanel() {
 
   const detectedTopology = topologyResult?.topology || activeTopology;
 
+  // Subscribe to device registry changes to trigger auto-assignment
+  // This ensures auto-assign runs when new devices connect
+  const registeredDeviceCount = useDeviceRegistry(
+    (state) => state.devices.size,
+  );
+
   const calibrationPreflight = useMemo(() => {
     const assignedCount = assignments.size;
     const aliveNodes =
@@ -613,12 +619,6 @@ export function DevicePanel() {
     syncReady,
     syncState,
   ]);
-
-  // Subscribe to device registry changes to trigger auto-assignment
-  // This ensures auto-assign runs when new devices connect
-  const registeredDeviceCount = useDeviceRegistry(
-    (state) => state.devices.size,
-  );
 
   // Auto-Assign Logic: When new devices appear, try to assign them
   // This effect runs whenever the device registry changes
@@ -975,7 +975,9 @@ export function DevicePanel() {
     });
 
     const artifact = unifiedCalibration.getCalibrationQcArtifact();
-    (artifact.timeline?.warnings || []).forEach((warning) => reasons.push(warning));
+    (artifact.timeline?.warnings || []).forEach((warning) =>
+      reasons.push(warning),
+    );
     (artifact.functionalChecks || [])
       .filter((check) => check.status !== "pass")
       .forEach((check) => {
@@ -1063,7 +1065,9 @@ export function DevicePanel() {
 
     const cautionReasons: string[] = [];
     if (timelineWarnings.length > 0) {
-      cautionReasons.push("Timing quality is degraded; measurements may be less stable.");
+      cautionReasons.push(
+        "Timing quality is degraded; measurements may be less stable.",
+      );
     }
     cautionReasons.push(...functionalCheckWarnings);
     if (isCalibrated && overallQuality > 0 && overallQuality < 75) {
@@ -1424,7 +1428,10 @@ export function DevicePanel() {
                   {retryRegionScope.length > 0 && (
                     <div className="mb-2">
                       <span className="text-[10px] px-2 py-0.5 rounded-full border border-warning/40 bg-warning/15 text-warning font-semibold">
-                        Targeted Retry Scope: {retryRegionScope.map((region) => RETRY_REGION_LABELS[region]).join(", ")}
+                        Targeted Retry Scope:{" "}
+                        {retryRegionScope
+                          .map((region) => RETRY_REGION_LABELS[region])
+                          .join(", ")}
                       </span>
                     </div>
                   )}
@@ -1470,7 +1477,10 @@ export function DevicePanel() {
                   </div>
                   <div className="space-y-1">
                     {timelineWarnings.slice(0, 3).map((warning, idx) => (
-                      <div key={`${warning}-${idx}`} className="text-[10px] text-white/80">
+                      <div
+                        key={`${warning}-${idx}`}
+                        className="text-[10px] text-white/80"
+                      >
                         {warning}
                       </div>
                     ))}
@@ -1496,7 +1506,10 @@ export function DevicePanel() {
                     {activeRetryRegions.length > 0 && (
                       <div className="mt-2 flex justify-center">
                         <span className="text-[10px] px-2 py-0.5 rounded-full border border-warning/40 bg-warning/15 text-warning font-semibold">
-                          Targeted Retry: {activeRetryRegions.map((region) => RETRY_REGION_LABELS[region]).join(", ")}
+                          Targeted Retry:{" "}
+                          {activeRetryRegions
+                            .map((region) => RETRY_REGION_LABELS[region])
+                            .join(", ")}
                         </span>
                       </div>
                     )}
