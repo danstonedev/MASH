@@ -886,6 +886,25 @@ export function DevicePanel() {
     );
   };
 
+  const retryRegionScope = useMemo(() => {
+    if (!unifiedState) return [] as RetryRegion[];
+    const artifact = unifiedCalibration.getCalibrationQcArtifact();
+    const regions = new Set<RetryRegion>();
+
+    artifact.criticalJointFailures.forEach((segmentId) => {
+      const mapped = segmentToRetryRegion(segmentId);
+      if (mapped) regions.add(mapped);
+    });
+
+    (artifact.functionalChecks || []).forEach((check) => {
+      if (check.status === "fail" && check.failedRegions) {
+        check.failedRegions.forEach((region) => regions.add(region));
+      }
+    });
+
+    return Array.from(regions);
+  }, [unifiedState]);
+
   const handleRetryFailedRegion = useCallback(() => {
     if (!hasAssignments) return;
     if (!calibrationPreflight.canStart) {
@@ -1008,25 +1027,6 @@ export function DevicePanel() {
     return (artifact.functionalChecks || []).some(
       (check) => check.status === "fail",
     );
-  }, [unifiedState]);
-
-  const retryRegionScope = useMemo(() => {
-    if (!unifiedState) return [] as RetryRegion[];
-    const artifact = unifiedCalibration.getCalibrationQcArtifact();
-    const regions = new Set<RetryRegion>();
-
-    artifact.criticalJointFailures.forEach((segmentId) => {
-      const mapped = segmentToRetryRegion(segmentId);
-      if (mapped) regions.add(mapped);
-    });
-
-    (artifact.functionalChecks || []).forEach((check) => {
-      if (check.status === "fail" && check.failedRegions) {
-        check.failedRegions.forEach((region) => regions.add(region));
-      }
-    });
-
-    return Array.from(regions);
   }, [unifiedState]);
 
   const trustStatus = useMemo(() => {
