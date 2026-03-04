@@ -20,6 +20,7 @@ import {
   type SystemCapabilities,
 } from "../biomech/topology/CapabilityMatrix";
 import type { SegmentId } from "../biomech/segmentRegistry";
+import { parsePhysicalKey } from "../lib/deviceKey";
 
 // ============================================================================
 // TRANSLATION LAYER: BodyRole ↔ SegmentId
@@ -457,16 +458,13 @@ export const useSensorAssignmentStore = create<SensorAssignmentState>()(
 
       /**
        * Find segment for a numeric sensor ID by searching all assignments.
-       * This handles various device ID formats like:
-       * - "USB 239a:8143_190" → matches 190
-       * - "sensor_190" → matches 190
+       * Matches by localSensorIndex from the physical key.
        * Used for playback fallback when session has no sensorMapping.
        */
       getSegmentByNumericId: (numericId: number) => {
         for (const [deviceId, assignment] of get().assignments.entries()) {
-          // Extract numeric suffix from device ID
-          const match = deviceId.match(/(\d+)$/);
-          if (match && parseInt(match[1], 10) === numericId) {
+          const parsed = parsePhysicalKey(deviceId);
+          if (parsed && parsed.localSensorIndex === numericId) {
             return assignment.segmentId;
           }
         }
@@ -524,6 +522,7 @@ export const useSensorAssignmentStore = create<SensorAssignmentState>()(
     }),
     {
       name: "imu-sensor-assignments",
+      version: 1,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         // Serialize Map to array for JSON storage

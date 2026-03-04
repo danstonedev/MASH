@@ -14,34 +14,42 @@ import { CheckCircle2, Battery, Signal, Link2Off } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useDeviceRegistry } from "../../store/useDeviceRegistry";
 import { useNetworkStore } from "../../store/useNetworkStore";
-import { isValidSensorId } from "../../lib/constants/HardwareRanges";
 import { useSensorAssignmentStore } from "../../store/useSensorAssignmentStore";
 import { BodyRole } from "../../biomech/topology/SensorRoles";
 import { cn } from "../../lib/utils";
-import {
-  getFriendlyIndex,
-  getSensorDisplayName,
-  registerSensorIds,
-} from "../../lib/sensorDisplayName";
-// import { Button } from './Button'; // Removed if it causes issues, using HTML button is safer
+import { getSensorDisplayName } from "../../lib/sensorDisplayName";
+import { parsePhysicalKey } from "../../lib/deviceKey";
 
 /**
- * Extract numeric sensor ID from device ID string.
- * Supports both legacy format ('sensor_0') and new multi-device format ('IMU-Connect_Gateway_0').
- * Returns NaN if no valid numeric ID can be extracted.
+ * Get a stable numeric sort key for a device key.
+ * rawNodeId * 256 + localSensorIndex (unique per-physical-sensor)
  */
-function extractSensorId(deviceId: string): number {
-  // Try legacy format first: 'sensor_X'
-  if (deviceId.startsWith("sensor_")) {
-    return parseInt(deviceId.substring(7));
+function getDeviceSortKey(deviceId: string): number {
+  const parsed = parsePhysicalKey(deviceId);
+  if (parsed) {
+    return parsed.rawNodeId * 256 + parsed.localSensorIndex;
   }
-  // New format: 'DeviceName_X' - extract the last numeric part after underscore
-  const lastUnderscore = deviceId.lastIndexOf("_");
-  if (lastUnderscore >= 0) {
-    return parseInt(deviceId.substring(lastUnderscore + 1));
-  }
-  // Fallback: try to parse the whole thing as a number
-  return parseInt(deviceId);
+  return 0;
+}
+
+/**
+ * Get 1-based display number for a device key.
+ * localSensorIndex + 1
+ */
+function getDisplayNumber(deviceId: string): number {
+  const parsed = parsePhysicalKey(deviceId);
+  if (parsed) return parsed.localSensorIndex + 1;
+  return 1;
+}
+
+/**
+ * Get a subtitle-friendly ID string for a device key.
+ * "N44:S0"
+ */
+function getDisplayId(deviceId: string): string {
+  const parsed = parsePhysicalKey(deviceId);
+  if (parsed) return `N${parsed.rawNodeId}:S${parsed.localSensorIndex}`;
+  return deviceId;
 }
 
 // Human-readable labels for BodyRoles (grouped)
@@ -82,23 +90,16 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
   const nodes = useNetworkStore((state) => state.nodes);
 
   const connectedDeviceEntries = useMemo(() => {
-    const entries: Array<{ id: string; sensorId: number; connected: boolean }> =
-      [];
+    const entries: Array<{ id: string; connected: boolean }> = [];
     devices.forEach((device, id) => {
-      const numericId = extractSensorId(id);
-      if (isNaN(numericId) || !isValidSensorId(numericId)) return;
-      if (numericId === 73) return;
-      entries.push({
-        id,
-        sensorId: numericId,
-        connected: !!device.isConnected,
-      });
+      entries.push({ id, connected: !!device.isConnected });
     });
     return entries;
   }, [devices]);
 
-  const topologySensorIds = useMemo(() => {
-    const ids = new Set<number>();
+  // Build expected device keys from network topology.
+  const topologyDeviceKeys = useMemo(() => {
+    const keys: string[] = [];
     nodes.forEach((node) => {
       const count =
         typeof node.sensorCount === "number" && node.sensorCount > 0
@@ -106,51 +107,48 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
           : node.sensors.size;
       if (!count || count <= 0) return;
       for (let i = 0; i < count; i++) {
-        ids.add((node.id + i) % 256);
+        keys.push(`node_${node.rawNodeId ?? node.id}_s${i}`);
       }
     });
-    return Array.from(ids).sort((a, b) => a - b);
+    return keys;
   }, [nodes]);
 
   // Build the panel list from topology + live devices so sensors are visible
   // even before their first IMU sample arrives.
+  // Uses STRING-based dedup (not numeric) to correctly handle physical keys
+  // where multiple nodes can share the same localSensorIndex.
   const connectedIds = useMemo(() => {
-    const sensorToDeviceId = new Map<number, string>();
+    const seen = new Set<string>();
+    const result: string[] = [];
 
     // Prefer connected live device IDs when available.
     for (const entry of connectedDeviceEntries) {
-      if (entry.connected) {
-        sensorToDeviceId.set(entry.sensorId, entry.id);
+      if (entry.connected && !seen.has(entry.id)) {
+        seen.add(entry.id);
+        result.push(entry.id);
       }
     }
 
     // Add topology-declared sensors that have no live packet yet.
-    for (const sensorId of topologySensorIds) {
-      if (!sensorToDeviceId.has(sensorId)) {
-        sensorToDeviceId.set(sensorId, `sensor_${sensorId}`);
+    for (const key of topologyDeviceKeys) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(key);
       }
     }
 
     // Fallback: if topology is still empty, show all connected devices.
-    if (sensorToDeviceId.size === 0) {
+    if (result.length === 0) {
       for (const entry of connectedDeviceEntries) {
-        if (entry.connected) sensorToDeviceId.set(entry.sensorId, entry.id);
+        if (entry.connected && !seen.has(entry.id)) {
+          seen.add(entry.id);
+          result.push(entry.id);
+        }
       }
     }
 
-    return Array.from(sensorToDeviceId.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([, deviceId]) => deviceId);
-  }, [connectedDeviceEntries, topologySensorIds]);
-
-  // Keep friendly sensor numbering consistent with the rest of the app.
-  useEffect(() => {
-    registerSensorIds(connectedIds.map((id) => extractSensorId(id)));
-  }, [connectedIds]);
-
-  // VIEW STATE
-  // const assignedCount = connectedIds.filter(id => assignments.has(id)).length;
-  // const hasCustomProfiles = Object.keys(savedProfiles).length > 0; // Unused without dropdown
+    return result.sort((a, b) => getDeviceSortKey(a) - getDeviceSortKey(b));
+  }, [connectedDeviceEntries, topologyDeviceKeys]);
 
   // EMPTY STATE
   if (connectedIds.length === 0) {
@@ -180,8 +178,8 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
             <SensorRow
               key={id}
               id={id}
-              displayIndex={getFriendlyIndex(extractSensorId(id))}
-              rawSensorId={extractSensorId(id)}
+              displayIndex={getDisplayNumber(id)}
+              displayId={getDisplayId(id)}
               isSelected={selectedSensorId === id}
               onSelect={setSelectedSensorId}
               onAssign={assign}
@@ -201,7 +199,7 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
 interface SensorRowProps {
   id: string;
   displayIndex: number;
-  rawSensorId: number;
+  displayId: string;
   isSelected: boolean;
   onSelect: (id: string | null) => void;
   onAssign: (id: string, role: BodyRole, method: "manual") => void;
@@ -211,7 +209,7 @@ interface SensorRowProps {
 const SensorRow = memo(function SensorRow({
   id,
   displayIndex,
-  rawSensorId,
+  displayId,
   isSelected,
   onSelect,
   onAssign,
@@ -230,19 +228,25 @@ const SensorRow = memo(function SensorRow({
     useShallow((state) => {
       const d = state.devices.get(id);
       return {
-        name: d?.name || getSensorDisplayName(rawSensorId),
-        battery: d?.battery || 0, // Correct property: battery (number)
+        name: d?.name || `Sensor ${displayIndex}`,
+        battery: d?.battery || 0,
         lastTapTime: d?.lastTapTime || 0,
         connectionHealth: d?.connectionHealth || "offline",
       };
     }),
   );
 
-  // Get node name for subtitle display
+  // Get node name for subtitle display.
+  const physicalParsed = useMemo(() => parsePhysicalKey(id), [id]);
   const nodeName = useNetworkStore(
     useCallback(
-      (state) => state.getNodeNameForSensor(rawSensorId),
-      [rawSensorId],
+      (state) => {
+        if (physicalParsed) {
+          return state.getNodeNameByRawId(physicalParsed.rawNodeId);
+        }
+        return null;
+      },
+      [physicalParsed],
     ),
   );
 
@@ -307,7 +311,7 @@ const SensorRow = memo(function SensorRow({
       >
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-white/90 truncate">
-            Sensor {displayIndex > 0 ? displayIndex : rawSensorId}
+            Sensor {displayIndex > 0 ? displayIndex : displayId}
           </span>
           {/* Tiny Status Icons */}
           <div className="flex items-center gap-1 opacity-40">
@@ -328,7 +332,7 @@ const SensorRow = memo(function SensorRow({
         </div>
         <div className="text-[9px] text-white/40">
           {nodeName ? `${nodeName} • ` : ""}
-          ID: {rawSensorId}
+          ID: {displayId}
           {deviceState.battery > 0 && deviceState.battery < 100
             ? ` • ${deviceState.battery}%`
             : ""}
@@ -341,7 +345,7 @@ const SensorRow = memo(function SensorRow({
           <select
             value={role || ""}
             onChange={handleRoleChange}
-            aria-label={`Assign sensor ${displayIndex > 0 ? displayIndex : rawSensorId} to body segment`}
+            aria-label={`Assign sensor ${displayIndex > 0 ? displayIndex : displayId} to body segment`}
             className={cn(
               "w-full bg-[#1a1a1a] text-[10px] rounded px-2 py-1.5 appearance-none cursor-pointer outline-none border transition-colors",
               role

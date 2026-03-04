@@ -549,6 +549,12 @@ export class IMUParser {
         const flags = data.getUint8(sensorOffset + 21);
         const isValid = (flags & 0x01) !== 0;
 
+        // S1-FIX: Physical identity from reserved bytes (Offsets 22-23)
+        // reserved[0] = rawNodeId (MAC-derived physical node ID, 0 = legacy FW)
+        // reserved[1] = localSensorIndex (sensor's index within its node, 0-based)
+        const rawNodeId = data.getUint8(sensorOffset + 22);
+        const localSensorIndex = data.getUint8(sensorOffset + 23);
+
         // Skip invalid sensors (Partial Frame Emission/Recovered Slots)
         if (!isValid) {
           _dropCountInvalid++;
@@ -593,6 +599,9 @@ export class IMUParser {
           battery: 100,
           format: "0x25-sync",
           syncQuality,
+          // S1-FIX: Physical identity (0 = legacy firmware without identity)
+          rawNodeId: rawNodeId > 0 ? rawNodeId : undefined,
+          localSensorIndex: rawNodeId > 0 ? localSensorIndex : undefined,
           // OPP-2: Frame completeness metadata (populated after sensor loop)
         };
 

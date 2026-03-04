@@ -36,6 +36,13 @@ export interface IMUDataPacket {
   battery: number;
   format: string; // e.g. "0x25-sync"
   syncQuality?: SyncQuality;
+  /** S1-FIX: Physical node ID (MAC-derived) from 0x25 reserved bytes.
+   *  Allows webapp to track physical sensor identity independently of
+   *  compact ID assignment. 0 = legacy firmware (field not populated). */
+  rawNodeId?: number;
+  /** S1-FIX: Sensor's local index within its node (0-based).
+   *  Combined with rawNodeId, uniquely identifies a physical sensor. */
+  localSensorIndex?: number;
   /** OPP-2: Frame completeness metadata */
   frameCompleteness?: {
     validCount: number;

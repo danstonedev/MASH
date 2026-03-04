@@ -6,17 +6,7 @@ import { useNetworkStore } from "../../store/useNetworkStore";
 import { useSensorAssignmentStore } from "../../store/useSensorAssignmentStore";
 import { resetAllStats } from "../../lib/connection/SyncedSampleStats";
 import { getSensorDisplayName } from "../../lib/sensorDisplayName";
-
-function extractSensorId(deviceId: string): number {
-  if (deviceId.startsWith("sensor_")) {
-    return parseInt(deviceId.substring(7), 10);
-  }
-  const lastUnderscore = deviceId.lastIndexOf("_");
-  if (lastUnderscore >= 0) {
-    return parseInt(deviceId.substring(lastUnderscore + 1), 10);
-  }
-  return parseInt(deviceId, 10);
-}
+import { makeDeviceKey } from "../../lib/deviceKey";
 
 export function SystemCommands() {
   const sendCommand = useDeviceStore((state) => state.sendCommand);
@@ -35,13 +25,19 @@ export function SystemCommands() {
   };
 
   const sensorRows = useMemo(() => {
-    const idToDevice = new Map<number, { id: string; name: string }>();
+    // Map from device key → row data. Uses string keys to avoid collisions
+    // between physical-key sensors that share the same localSensorIndex.
+    const deviceMap = new Map<
+      string,
+      { id: string; sensorId: number; name: string }
+    >();
 
     devices.forEach((device, id) => {
-      const sensorId = extractSensorId(id);
+      const sensorId = device.packetSensorId ?? NaN;
       if (!Number.isFinite(sensorId)) return;
-      idToDevice.set(sensorId, {
+      deviceMap.set(id, {
         id,
+        sensorId,
         name: device.name || getSensorDisplayName(sensorId),
       });
     });
@@ -55,19 +51,21 @@ export function SystemCommands() {
       if (!count || count <= 0) return;
       for (let i = 0; i < count; i++) {
         const sensorId = (node.id + i) % 256;
-        if (!idToDevice.has(sensorId)) {
-          const nodeName = getNodeNameForSensor(sensorId);
-          idToDevice.set(sensorId, {
-            id: `sensor_${sensorId}`,
+        const deviceKey = makeDeviceKey(node.rawNodeId, i, sensorId);
+        if (!deviceMap.has(deviceKey)) {
+          const nodeName = node.name || null;
+          deviceMap.set(deviceKey, {
+            id: deviceKey,
+            sensorId,
             name: nodeName || getSensorDisplayName(sensorId),
           });
         }
       }
     });
 
-    return Array.from(idToDevice.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([sensorId, device]) => ({ sensorId, ...device }));
+    return Array.from(deviceMap.values()).sort(
+      (a, b) => a.sensorId - b.sensorId,
+    );
   }, [devices, nodes, getNodeNameForSensor]);
 
   const handleZeroGyros = () => {

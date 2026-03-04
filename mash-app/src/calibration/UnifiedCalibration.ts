@@ -224,15 +224,15 @@ export interface CalibrationQcArtifact {
 
 /** Structured per-run telemetry counters (Phase 0 from the fit-it plan) */
 export interface CalibrationTelemetry {
-  preflightFailures: Record<string, number>;  // reason → count
-  stageRetries: Record<string, number>;       // step → retry count
+  preflightFailures: Record<string, number>; // reason → count
+  stageRetries: Record<string, number>; // step → retry count
   timelineInterpolationRatio: number;
   timelineDroppedRatio: number;
   timelineMaxSkewMs: number;
   staticCaptureAttempts: number;
   staticCaptureSuccesses: number;
   functionalExtensions: Record<string, number>; // step → extension count
-  durationMs: number;                           // total calibration wall-clock time
+  durationMs: number; // total calibration wall-clock time
 }
 
 export interface UnifiedCalibrationState {
@@ -1096,7 +1096,8 @@ export class UnifiedCalibration {
         break;
 
       case "leg-right-functional":
-        if (!this.checkTimelineGateBeforeCapture("leg-right-functional")) return;
+        if (!this.checkTimelineGateBeforeCapture("leg-right-functional"))
+          return;
         this.captureFunctionalDataByPredicate(
           (segmentLower) =>
             segmentLower.includes("thigh_r") ||
@@ -1120,7 +1121,8 @@ export class UnifiedCalibration {
         break;
 
       case "arm-right-functional":
-        if (!this.checkTimelineGateBeforeCapture("arm-right-functional")) return;
+        if (!this.checkTimelineGateBeforeCapture("arm-right-functional"))
+          return;
         this.captureFunctionalDataByPredicate(
           (segmentLower) =>
             segmentLower.includes("upper_arm_r") ||
@@ -1351,19 +1353,16 @@ export class UnifiedCalibration {
 
   public getCalibrationQcArtifact(): CalibrationQcArtifact {
     const timelineDiag = this.buffers.getAlignmentDiagnostics();
-    const durationMs = this.calibrationStartMs > 0
-      ? Date.now() - this.calibrationStartMs
-      : 0;
+    const durationMs =
+      this.calibrationStartMs > 0 ? Date.now() - this.calibrationStartMs : 0;
 
     // Build telemetry
     const totalPairs = timelineDiag.totalPairs;
-    const interpolationRatio = totalPairs > 0
-      ? timelineDiag.interpolatedPairs / totalPairs
-      : 0;
+    const interpolationRatio =
+      totalPairs > 0 ? timelineDiag.interpolatedPairs / totalPairs : 0;
     const droppedDenom = totalPairs + timelineDiag.droppedPairs;
-    const droppedRatio = droppedDenom > 0
-      ? timelineDiag.droppedPairs / droppedDenom
-      : 0;
+    const droppedRatio =
+      droppedDenom > 0 ? timelineDiag.droppedPairs / droppedDenom : 0;
 
     const functionalExtensions: Record<string, number> = {};
     for (const [step, count] of this.functionalStepExtensions) {
@@ -1444,7 +1443,8 @@ export class UnifiedCalibration {
       // Track preflight failures by reason
       for (const seg of failedSegments) {
         const reason = seg.match(/\((.+)\)/)?.[1] || "unknown";
-        this.preflightFailures[reason] = (this.preflightFailures[reason] || 0) + 1;
+        this.preflightFailures[reason] =
+          (this.preflightFailures[reason] || 0) + 1;
       }
 
       this.logAudit(
@@ -1589,7 +1589,8 @@ export class UnifiedCalibration {
     quatVariance /= qWindow.length;
 
     const gyroMean =
-      gWindow.reduce((sum, sample) => sum + sample.length(), 0) / gWindow.length;
+      gWindow.reduce((sum, sample) => sum + sample.length(), 0) /
+      gWindow.length;
 
     const accelMagnitudes = aWindow.map((sample) => sample.length());
     const accelMean =
@@ -1646,7 +1647,10 @@ export class UnifiedCalibration {
       const baseline = samples[0];
       let maxAngle = 0;
       for (const sample of samples) {
-        maxAngle = Math.max(maxAngle, sample.angleTo(baseline) * (180 / Math.PI));
+        maxAngle = Math.max(
+          maxAngle,
+          sample.angleTo(baseline) * (180 / Math.PI),
+        );
       }
       maxAngles.push(maxAngle);
     });
@@ -1718,7 +1722,10 @@ export class UnifiedCalibration {
     let signal: number[] = [];
     if (leftThigh.length > 0 && rightThigh.length > 0) {
       const n = Math.min(leftThigh.length, rightThigh.length);
-      signal = Array.from({ length: n }, (_, i) => (leftThigh[i] + rightThigh[i]) / 2);
+      signal = Array.from(
+        { length: n },
+        (_, i) => (leftThigh[i] + rightThigh[i]) / 2,
+      );
     } else {
       signal = this.buildGlobalMotionSignal();
     }
@@ -1748,8 +1755,13 @@ export class UnifiedCalibration {
       return {
         check: "squat-check",
         status: "fail",
-        summary: "Squat movement was insufficient for a reliable functional check.",
-        metrics: { motionRangeDeg: motionRange, repsDetected: reps, symmetryDeltaDeg: symmetryDelta },
+        summary:
+          "Squat movement was insufficient for a reliable functional check.",
+        metrics: {
+          motionRangeDeg: motionRange,
+          repsDetected: reps,
+          symmetryDeltaDeg: symmetryDelta,
+        },
         recommendation:
           "Try this now: complete 3-5 deeper, controlled squat reps and keep both legs moving symmetrically.",
         failedRegions: ["legs"],
@@ -1761,7 +1773,11 @@ export class UnifiedCalibration {
         check: "squat-check",
         status: "warn",
         summary: "Squat-check passed with moderate quality warnings.",
-        metrics: { motionRangeDeg: motionRange, repsDetected: reps, symmetryDeltaDeg: symmetryDelta },
+        metrics: {
+          motionRangeDeg: motionRange,
+          repsDetected: reps,
+          symmetryDeltaDeg: symmetryDelta,
+        },
         recommendation:
           "Optional improvement: repeat squat-check with 3-5 smooth, symmetric reps.",
       };
@@ -1771,7 +1787,11 @@ export class UnifiedCalibration {
       check: "squat-check",
       status: "pass",
       summary: "Squat-check confirms stable dynamic calibration transfer.",
-      metrics: { motionRangeDeg: motionRange, repsDetected: reps, symmetryDeltaDeg: symmetryDelta },
+      metrics: {
+        motionRangeDeg: motionRange,
+        repsDetected: reps,
+        symmetryDeltaDeg: symmetryDelta,
+      },
     };
   }
 
@@ -1787,7 +1807,9 @@ export class UnifiedCalibration {
       if (!samples || samples.length < 2) return [];
 
       const baseline = samples[0];
-      return samples.map((sample) => sample.angleTo(baseline) * (180 / Math.PI));
+      return samples.map(
+        (sample) => sample.angleTo(baseline) * (180 / Math.PI),
+      );
     }
 
     return [];
@@ -1815,7 +1837,11 @@ export class UnifiedCalibration {
     });
   }
 
-  private countReps(signal: number[], peakThresholdDeg: number, minSpacing: number): number {
+  private countReps(
+    signal: number[],
+    peakThresholdDeg: number,
+    minSpacing: number,
+  ): number {
     let reps = 0;
     let lastPeakIdx = -minSpacing;
 
@@ -1854,7 +1880,8 @@ export class UnifiedCalibration {
     const interpolationRatio =
       totalPairs > 0 ? diag.interpolatedPairs / totalPairs : 0;
     const droppedDenom = totalPairs + diag.droppedPairs;
-    const droppedRatio = droppedDenom > 0 ? diag.droppedPairs / droppedDenom : 0;
+    const droppedRatio =
+      droppedDenom > 0 ? diag.droppedPairs / droppedDenom : 0;
 
     const { tier, reasons } = evaluateTimelineGateTier({
       maxSkewMs: diag.maxSkewMs,

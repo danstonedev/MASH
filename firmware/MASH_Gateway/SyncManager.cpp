@@ -79,11 +79,12 @@ void SyncManager::init(const char *deviceName)
   // ============================================================================
   // WiFi Setup for ESP-NOW
   // ============================================================================
-  // We use WIFI_STA mode for ESP-NOW. TSF-based sync is NOT available without
-  // actual WiFi AP connection, so we use micros()-based sync instead.
-  // The beacon.gatewayTimeUs field carries micros() timestamp.
+  // V5-FIX: Was WIFI_STA which overrode the WIFI_AP_STA set by MASH_Gateway.ino.
+  // AP_STA is required so the Gateway can simultaneously:
+  //   - Run ESP-NOW for TDMA node communication (STA side)
+  //   - Host a SoftAP for webapp WiFi connectivity (AP side)
   // ============================================================================
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_AP_STA);
 
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK)
@@ -132,6 +133,51 @@ void SyncManager::update()
       // Wait for nodes to register during discovery phase
       // OPP-8: Use shortened discovery if pre-registered nodes loaded from NVS
       {
+        // ====================================================================
+        // P3-FIX: Evict NVS ghost nodes mid-discovery.
+        // NVS-loaded nodes have lastHeard=0 (V2 fix). If they haven't
+        // sent a heartbeat within 5s of discovery start, they're genuinely
+        // absent — unregister them so their slots are freed for real nodes.
+        // Only runs once per discovery cycle to avoid churn.
+        // ====================================================================
+        {
+          static bool ghostEvictionDone = false;
+          uint32_t discoveryElapsed = millis() - discoveryStartTime;
+
+          if (!ghostEvictionDone && preRegisteredNodeCount > 0 &&
+              discoveryElapsed > 5000)
+          {
+            bool evicted = false;
+            for (int i = 0; i < TDMA_MAX_NODES; i++)
+            {
+              if (registeredNodes[i].registered &&
+                  registeredNodes[i].lastHeard == 0)
+              {
+                SAFE_LOG("[TDMA] P3: Evicting NVS ghost node %d (%s) — "
+                         "no heartbeat in 5s\n",
+                         registeredNodes[i].nodeId,
+                         registeredNodes[i].nodeName);
+                registeredNodes[i].registered = false;
+                nodeCount--;
+                evicted = true;
+              }
+            }
+            if (evicted)
+            {
+              SAFE_LOG("[TDMA] P3: Ghost eviction complete, %d live nodes remain\n",
+                       nodeCount);
+            }
+            ghostEvictionDone = true;
+          }
+
+          // Reset flag when discovery restarts (restartDiscovery sets IDLE first)
+          if (discoveryElapsed < 100)
+          {
+            ghostEvictionDone = false;
+          }
+        }
+        // ====================================================================
+
         uint32_t discoveryTimeout = (preRegisteredNodeCount > 0)
                                         ? SHORT_DISCOVERY_MS
                                         : DISCOVERY_DURATION_MS;
@@ -139,14 +185,50 @@ void SyncManager::update()
         {
           if (nodeCount > 0)
           {
-            // Nodes registered, calculate slots and broadcast schedule
-            recalculateSlots();
-            sendTDMASchedule();
-            tdmaState = TDMA_STATE_SYNC;
-            // OPP-8: Clear pre-registered count — they've been absorbed
-            preRegisteredNodeCount = 0;
-            SAFE_LOG("[TDMA] Discovery complete: %d nodes registered\n",
-                     nodeCount);
+            // ==================================================================
+            // P4-FIX: Auto-extend discovery if not all expected nodes connected.
+            // If NVS expected N nodes but only M < N are alive (lastHeard > 0),
+            // extend discovery ONE more time (up to full 10s) to give
+            // stragglers a chance. After the extension, proceed regardless.
+            // ==================================================================
+            uint8_t aliveCount = 0;
+            for (int i = 0; i < TDMA_MAX_NODES; i++)
+            {
+              if (registeredNodes[i].registered &&
+                  registeredNodes[i].lastHeard > 0)
+              {
+                aliveCount++;
+              }
+            }
+
+            static bool discoveryExtended = false;
+            if (preRegisteredNodeCount > 0 && aliveCount < preRegisteredNodeCount &&
+                !discoveryExtended)
+            {
+              discoveryExtended = true;
+              SAFE_LOG("[TDMA] P4: Only %d/%d expected nodes alive — "
+                       "extending discovery by %lu ms\n",
+                       aliveCount, preRegisteredNodeCount,
+                       DISCOVERY_DURATION_MS);
+              discoveryStartTime = millis();
+              // Don't break — let the loop continue sending beacons
+            }
+            else
+            {
+              // All expected nodes found, or extension already used — proceed
+              discoveryExtended = false; // Reset for next discovery cycle
+
+              // Nodes registered, calculate slots and broadcast schedule
+              recalculateSlots();
+              sendTDMASchedule();
+              tdmaState = TDMA_STATE_SYNC;
+              // OPP-8: Clear pre-registered count — they've been absorbed
+              preRegisteredNodeCount = 0;
+              SAFE_LOG("[TDMA] Discovery complete: %d nodes registered "
+                       "(%d alive)\n",
+                       nodeCount, aliveCount);
+            }
+            // ==================================================================
           }
           else
           {
@@ -209,17 +291,20 @@ void SyncManager::update()
           sendTDMASchedule();
         }
 
-        // Periodically prune inactive nodes and resend schedule
-        // CRITICAL: NEVER prune while streaming. Pruning shifts compact
-        // sensor IDs which would corrupt the identity mapping in
-        // SyncFrameBuffer and the webapp. If a node goes silent during
-        // a recording session, effectiveSensorCount handles it gracefully
-        // (partial frame emission with zeros for missing sensors).
-        // Pruning only runs in idle/standby when isStreaming==false.
-        if (!isStreaming && millis() - lastPruneTime > 5000)
+        // Periodically prune inactive nodes and resend schedule.
+        // V1-FIX: Pruning was gated on !isStreaming, but isStreaming is
+        // force-latched true in loop(), so pruning NEVER ran. Now we prune
+        // with a longer timeout during streaming (30s) vs idle (5s).
+        // Pruning during streaming will trigger SyncFrameBuffer reinit via
+        // the onNodePruned callback, which is necessary to keep the sensor
+        // mapping consistent.
         {
-          pruneInactiveNodes();
-          lastPruneTime = millis();
+          uint32_t pruneInterval = isStreaming ? 30000 : 5000;
+          if (millis() - lastPruneTime > pruneInterval)
+          {
+            pruneInactiveNodes();
+            lastPruneTime = millis();
+          }
         }
       }
       break;
@@ -1135,26 +1220,21 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
       // ========================================================================
       // RATE LIMIT SCHEDULE RE-SENDS TO PREVENT TX QUEUE FLOODING
       // ========================================================================
-      // If Node keeps re-registering, it means it's not receiving schedules.
-      // But sending schedule on EVERY registration floods ESP-NOW TX queue,
-      // causing even MORE failures (100%+ failure rate observed).
-      // Solution: Only re-send schedule at most once per second per node.
+      // V4-FIX: Use per-node rate limiting instead of global static.
+      // The old global approach starved late-registering nodes: if node A
+      // triggered a resend, node B was rate-limited for 1s even though it
+      // never received a schedule.
       // ========================================================================
-      static uint32_t lastScheduleResendTime = 0;
-      static uint8_t lastResendNodeId = 0xFF;
-
       uint32_t now = millis();
       bool shouldResend = false;
 
       if (tdmaState == TDMA_STATE_SYNC || tdmaState == TDMA_STATE_RUNNING)
       {
-        // Only resend if it's a different node OR >1 second since last resend
-        if (reg->nodeId != lastResendNodeId ||
-            (now - lastScheduleResendTime) > 1000)
+        // Only resend if >1 second since last resend TO THIS NODE
+        if ((now - registeredNodes[i].lastScheduleSentMs) > 1000)
         {
           shouldResend = true;
-          lastScheduleResendTime = now;
-          lastResendNodeId = reg->nodeId;
+          registeredNodes[i].lastScheduleSentMs = now;
         }
       }
 
@@ -1203,15 +1283,28 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
       // ====================================================================
       // ADMISSION CONTROL: Project frame time with this node included.
       // Reject registration if the schedule would exceed the 20ms budget.
+      // P1-FIX: Only count ALIVE nodes in frame budget projection.
+      // NVS ghost nodes (lastHeard=0 or stale >10s) are dead weight that
+      // will be pruned once RUNNING state begins. Counting them here
+      // incorrectly rejects real nodes trying to register.
       // ====================================================================
       {
         uint8_t sensorCounts[TDMA_MAX_NODES];
         uint8_t projectedCount = 0;
+        uint32_t now = millis();
         for (int j = 0; j < TDMA_MAX_NODES; j++)
         {
           if (registeredNodes[j].registered)
           {
-            sensorCounts[projectedCount++] = registeredNodes[j].sensorCount;
+            // P1-FIX: Skip NVS ghosts — nodes that haven't been heard from
+            // since they were loaded. lastHeard=0 (V2 fix) means NVS-loaded
+            // and never seen. Also skip any node not heard in >10s (stale).
+            bool isAlive = (registeredNodes[j].lastHeard > 0) &&
+                           (now - registeredNodes[j].lastHeard <= 10000);
+            if (isAlive)
+            {
+              sensorCounts[projectedCount++] = registeredNodes[j].sensorCount;
+            }
           }
         }
         sensorCounts[projectedCount++] = reg->sensorCount; // candidate node
@@ -1222,9 +1315,9 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
         if (projectedFrameUs > budgetUs)
         {
           SAFE_LOG("[TDMA] REJECTED node %d (%s, %d sensors): "
-                   "would overflow frame (%lu > %lu µs)\n",
+                   "would overflow frame (%lu > %lu µs, %d alive nodes)\n",
                    reg->nodeId, reg->nodeName, reg->sensorCount,
-                   projectedFrameUs, budgetUs);
+                   projectedFrameUs, budgetUs, projectedCount - 1);
           return;
         }
       }
@@ -1425,7 +1518,10 @@ uint8_t SyncManager::getExpectedSensorCount() const
   {
     if (registeredNodes[i].registered)
     {
-      totalSensors += registeredNodes[i].sensorCount;
+      // S3-FIX: Treat sensorCount=0 as 1 (consistent with getCompactSensorId)
+      totalSensors += (registeredNodes[i].sensorCount > 0)
+                          ? registeredNodes[i].sensorCount
+                          : 1;
     }
   }
   return totalSensors;
@@ -1434,20 +1530,48 @@ uint8_t SyncManager::getExpectedSensorCount() const
 uint8_t SyncManager::getExpectedSensorIds(uint8_t *sensorIds,
                                           uint8_t maxCount) const
 {
-  uint8_t idx = 0;
-  for (int i = 0; i < TDMA_MAX_NODES && idx < maxCount; i++)
+  // S2-FIX: Use the SAME sorted order as getCompactSensorId so that
+  // expected sensor IDs match the compact IDs used in the data path.
+  // Without this, the expected list could be in a different order than
+  // the compact IDs, causing the SyncFrameBuffer to reject valid samples.
+
+  // Build sorted index list (same logic as getCompactSensorId)
+  uint8_t sortedIndices[TDMA_MAX_NODES];
+  uint8_t sortedCount = 0;
+
+  for (int i = 0; i < TDMA_MAX_NODES; i++)
   {
     if (registeredNodes[i].registered)
     {
-      uint8_t sensorCount = registeredNodes[i].sensorCount;
+      sortedIndices[sortedCount++] = i;
+    }
+  }
 
-      // Use gateway-local compact IDs to guarantee uniqueness even if
-      // nodeId ranges overlap (e.g., node A: 88..93 and node B: 92..94).
-      for (uint8_t s = 0; s < sensorCount && idx < maxCount; s++)
-      {
-        sensorIds[idx] = (uint8_t)(idx + 1);
-        idx++;
-      }
+  // Insertion sort by nodeId
+  for (uint8_t a = 1; a < sortedCount; a++)
+  {
+    uint8_t key = sortedIndices[a];
+    int8_t b = a - 1;
+    while (b >= 0 && registeredNodes[sortedIndices[b]].nodeId >
+                         registeredNodes[key].nodeId)
+    {
+      sortedIndices[b + 1] = sortedIndices[b];
+      b--;
+    }
+    sortedIndices[b + 1] = key;
+  }
+
+  uint8_t idx = 0;
+  for (uint8_t s = 0; s < sortedCount && idx < maxCount; s++)
+  {
+    const TDMANodeInfo &node = registeredNodes[sortedIndices[s]];
+    // S3-FIX: Treat sensorCount=0 as 1
+    const uint8_t effectiveCount = (node.sensorCount > 0) ? node.sensorCount : 1;
+
+    for (uint8_t si = 0; si < effectiveCount && idx < maxCount; si++)
+    {
+      sensorIds[idx] = (uint8_t)(idx + 1);
+      idx++;
     }
   }
   return idx;
@@ -1456,27 +1580,63 @@ uint8_t SyncManager::getExpectedSensorIds(uint8_t *sensorIds,
 uint8_t SyncManager::getCompactSensorId(uint8_t nodeId,
                                         uint8_t localSensorIndex) const
 {
-  uint8_t compactBase = 0;
+  // ==========================================================================
+  // S2-FIX: STABLE COMPACT IDs — Sort registered nodes by nodeId before
+  // computing compact bases. This ensures the same set of nodes always
+  // produces the same compact IDs, regardless of registration order or
+  // which array slot they landed in. Without this, nodes dropping and
+  // re-registering in different slots shifted ALL subsequent compact IDs,
+  // causing the webapp to lose track of sensor identity.
+  // ==========================================================================
+
+  // Build a sorted index list of registered nodes (by ascending nodeId)
+  uint8_t sortedIndices[TDMA_MAX_NODES];
+  uint8_t sortedCount = 0;
 
   for (int i = 0; i < TDMA_MAX_NODES; i++)
   {
-    if (!registeredNodes[i].registered)
+    if (registeredNodes[i].registered)
     {
-      continue;
+      sortedIndices[sortedCount++] = i;
     }
+  }
 
-    const uint8_t sensorCount = registeredNodes[i].sensorCount;
-
-    if (registeredNodes[i].nodeId == nodeId)
+  // Insertion sort by nodeId (max 8 nodes, trivial cost)
+  for (uint8_t a = 1; a < sortedCount; a++)
+  {
+    uint8_t key = sortedIndices[a];
+    int8_t b = a - 1;
+    while (b >= 0 && registeredNodes[sortedIndices[b]].nodeId >
+                         registeredNodes[key].nodeId)
     {
-      if (localSensorIndex >= sensorCount)
+      sortedIndices[b + 1] = sortedIndices[b];
+      b--;
+    }
+    sortedIndices[b + 1] = key;
+  }
+
+  // Walk sorted nodes to compute stable compact base
+  uint8_t compactBase = 0;
+
+  for (uint8_t s = 0; s < sortedCount; s++)
+  {
+    const TDMANodeInfo &node = registeredNodes[sortedIndices[s]];
+    // S3-FIX: Treat sensorCount=0 as 1 to prevent compact base collisions.
+    // A node that registered before sensor scanning completed will have
+    // sensorCount=0, but will send data once sensors are found. Using 0
+    // here would cause the next node's compact base to collide.
+    const uint8_t effectiveCount = (node.sensorCount > 0) ? node.sensorCount : 1;
+
+    if (node.nodeId == nodeId)
+    {
+      if (localSensorIndex >= effectiveCount)
       {
         return 0;
       }
       return (uint8_t)(compactBase + localSensorIndex + 1);
     }
 
-    compactBase = (uint8_t)(compactBase + sensorCount);
+    compactBase = (uint8_t)(compactBase + effectiveCount);
   }
 
   return 0;
@@ -1617,9 +1777,12 @@ void SyncManager::loadTopologyFromNVS()
       registeredNodes[i].nodeName[15] = '\0'; // Safety null-terminate
       memcpy(registeredNodes[i].mac, entry.mac, 6);
       registeredNodes[i].registered = true;
-      registeredNodes[i].lastHeard = millis(); // Mark as "just seen"
-      registeredNodes[i].slotOffsetUs = 0;     // Will be recalculated
-      registeredNodes[i].slotWidthUs = 0;      // Will be recalculated
+      registeredNodes[i].lastHeard = 0; // V2-FIX: Mark as NOT recently heard.
+      // Setting millis() here made NVS-loaded dead nodes appear alive,
+      // preventing pruning for a full timeout cycle. Zero ensures they
+      // must re-register (send a heartbeat) to stay in the topology.
+      registeredNodes[i].slotOffsetUs = 0; // Will be recalculated
+      registeredNodes[i].slotWidthUs = 0;  // Will be recalculated
       loaded++;
 
       SAFE_LOG("[TDMA-NVS] Loaded node %d (%s) with %d sensors\n", entry.nodeId,

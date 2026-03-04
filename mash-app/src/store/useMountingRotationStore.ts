@@ -107,6 +107,7 @@ export const useMountingRotationStore = create<MountingRotationState>()(
     }),
     {
       name: "imu-mounting-rotations",
+      version: 1,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         rotations: Array.from(state.rotations.entries()).map(([k, v]) => ({

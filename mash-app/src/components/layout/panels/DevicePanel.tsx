@@ -29,7 +29,7 @@ import { useNetworkStore } from "../../../store/useNetworkStore";
 import { useCalibrationStore } from "../../../store/useCalibrationStore";
 import { useSensorAssignmentStore } from "../../../store/useSensorAssignmentStore";
 import { useTareStore } from "../../../store/useTareStore";
-import { isValidSensorId } from "../../../lib/constants/HardwareRanges";
+import { parsePhysicalKey } from "../../../lib/deviceKey";
 import { unifiedCalibration } from "../../../calibration/UnifiedCalibration";
 import type {
   UnifiedCalibrationState,
@@ -492,20 +492,9 @@ export function DevicePanel() {
   const isCalibrated = calibrationStep === "calibrated";
 
   const connectedSensorCountFromRegistry = useDeviceRegistry((state) => {
-    const extractNumericId = (id: string): number => {
-      const lastUnderscore = id.lastIndexOf("_");
-      if (lastUnderscore >= 0) {
-        return parseInt(id.substring(lastUnderscore + 1), 10);
-      }
-      const legacy = id.startsWith("sensor_") ? id.substring(7) : id;
-      return parseInt(legacy, 10);
-    };
-
     let count = 0;
     state.devices.forEach((device, id) => {
-      const numericId = extractNumericId(id);
-      if (!device.isConnected || Number.isNaN(numericId)) return;
-      if (!isValidSensorId(numericId) || numericId === 73) return;
+      if (!device.isConnected) return;
       count++;
     });
     return count;
@@ -630,9 +619,11 @@ export function DevicePanel() {
     // Sort device IDs for consistent sequential indexing
     // This ensures deterministic processing order while assigning by name.
     const sortedDeviceIds = Array.from(devices.keys()).sort((a, b) => {
-      const numA = parseInt(a.replace(/\D/g, "")) || 0;
-      const numB = parseInt(b.replace(/\D/g, "")) || 0;
-      return numA - numB;
+      const getSort = (id: string): number => {
+        const parsed = parsePhysicalKey(id);
+        return parsed ? parsed.rawNodeId * 256 + parsed.localSensorIndex : 0;
+      };
+      return getSort(a) - getSort(b);
     });
 
     sortedDeviceIds.forEach((deviceId, index) => {

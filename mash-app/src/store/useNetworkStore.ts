@@ -24,7 +24,8 @@ export interface SensorInfo {
 }
 
 export interface NodeInfo {
-  id: number; // Node ID (= sensorIdOffset from firmware MAC XOR hash)
+  id: number; // Node ID (= compactBase from gateway, used for _sensorToNodeMap)
+  rawNodeId?: number; // Physical MAC-derived node ID from firmware (stable across topology changes)
   name: string;
   firmwareName?: string; // Original name from firmware NodeInfo (e.g. "MASH", custom name)
   sensors: Map<number, SensorInfo>;
@@ -62,6 +63,7 @@ interface NetworkState {
     sensorCount: number,
     hasBaro: boolean,
     hasMag: boolean,
+    rawNodeId?: number,
   ) => void;
   updateNodeEnvironmental: (
     nodeId: number,
@@ -79,12 +81,24 @@ interface NetworkState {
   isExpectedSensorId: (sensorId: number) => boolean;
   getSensorStatus: (sensorId: number) => "active" | "stale" | "offline";
   getNodeStatus: (nodeId: number) => "active" | "stale" | "offline";
+
+  // PHASE-1: Physical identity lookups
+  /** Get node info by physical rawNodeId (MAC-derived) */
+  getNodeByRawId: (rawNodeId: number) => NodeInfo | null;
+  /** Get node name by rawNodeId for display */
+  getNodeNameByRawId: (rawNodeId: number) => string | null;
+  /** Get sensor count for a node by rawNodeId */
+  getNodeSensorCountByRawId: (rawNodeId: number) => number | undefined;
 }
 
 // Sensor ID → Node ID lookup table (populated from Node Info + sync_status)
 // Maps each compact sensorId to its owning compact nodeId (base) so that
 // incoming 0x25 SyncFrame samples route to the correct node.
 const _sensorToNodeMap = new Map<number, number>();
+
+// PHASE-1: Raw node ID → compact node ID reverse map.
+// Allows looking up node metadata when we only have the physical rawNodeId.
+const _rawToCompactNodeMap = new Map<number, number>();
 
 /**
  * Derive Node ID from Sensor ID.
@@ -186,9 +200,14 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     });
   },
 
-  registerNode: (nodeId, name, sensorCount, hasBaro, hasMag) => {
+  registerNode: (nodeId, name, sensorCount, hasBaro, hasMag, rawNodeId) => {
     const now = Date.now();
     registerNodeId(nodeId);
+
+    // PHASE-1: Track rawNodeId → compactBase mapping
+    if (rawNodeId !== undefined && rawNodeId > 0) {
+      _rawToCompactNodeMap.set(rawNodeId, nodeId);
+    }
 
     // Use firmware-provided name when it's meaningful (not the generic default).
     // Generic defaults: "MASH", empty, or starts with "Node-" (gateway placeholder).
@@ -215,6 +234,7 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
       if (!node) {
         node = {
           id: nodeId,
+          rawNodeId: rawNodeId,
           name: logicalName,
           firmwareName: name || undefined,
           sensors: new Map(),
@@ -233,6 +253,7 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
         ) {
           node = {
             ...node,
+            rawNodeId: rawNodeId ?? node.rawNodeId,
             name: logicalName,
             firmwareName: name || node.firmwareName,
             hasBarometer: hasBaro,
@@ -319,6 +340,7 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
 
   reset: () => {
     _sensorToNodeMap.clear();
+    _rawToCompactNodeMap.clear();
     resetNodeRegistry();
     set({
       gateway: {
@@ -411,5 +433,26 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     if (age < STALE_THRESHOLD_MS) return "active";
     if (age < OFFLINE_THRESHOLD_MS) return "stale";
     return "offline";
+  },
+
+  // PHASE-1: Physical identity lookups
+  getNodeByRawId: (rawNodeId) => {
+    const compactBase = _rawToCompactNodeMap.get(rawNodeId);
+    if (compactBase === undefined) return null;
+    return get().nodes.get(compactBase) ?? null;
+  },
+
+  getNodeNameByRawId: (rawNodeId) => {
+    const compactBase = _rawToCompactNodeMap.get(rawNodeId);
+    if (compactBase === undefined) return null;
+    const node = get().nodes.get(compactBase);
+    return node?.name ?? null;
+  },
+
+  getNodeSensorCountByRawId: (rawNodeId) => {
+    const compactBase = _rawToCompactNodeMap.get(rawNodeId);
+    if (compactBase === undefined) return undefined;
+    const node = get().nodes.get(compactBase);
+    return node?.sensorCount;
   },
 }));

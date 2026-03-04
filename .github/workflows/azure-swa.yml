@@ -5,15 +5,15 @@ on:
     branches:
       - main
     paths:
-      - 'mash-app/**'
-      - '.github/workflows/azure-swa.yml'
+      - "mash-app/**"
+      - ".github/workflows/azure-swa.yml"
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
     paths:
-      - 'mash-app/**'
-      - '.github/workflows/azure-swa.yml'
+      - "mash-app/**"
+      - ".github/workflows/azure-swa.yml"
 
 jobs:
   build_and_deploy_job:
@@ -21,28 +21,20 @@ jobs:
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: true
-
-      - name: Debug repo layout
-        run: |
-          pwd
-          ls -la
-          find . -maxdepth 3 -type f \( -name package.json -o -name index.html \) | head -20
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
-      - name: Check Node Version
-        run: node -v
-
-      - name: Install and Build
+      - name: Install, Test and Build
         working-directory: mash-app
         run: |
           npm ci
+          npm test -- --reporter=verbose
           npm run build
 
       - name: Build And Deploy

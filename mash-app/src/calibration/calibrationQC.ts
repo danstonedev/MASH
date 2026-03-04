@@ -412,7 +412,10 @@ export function buildCalibrationQcMarkdown(
       ? artifact.functionalChecks
           .map((check) => {
             const metrics = Object.entries(check.metrics)
-              .map(([key, value]) => `${key}=${Number.isFinite(value) ? value.toFixed(3) : value}`)
+              .map(
+                ([key, value]) =>
+                  `${key}=${Number.isFinite(value) ? value.toFixed(3) : value}`,
+              )
               .join(", ");
             const regions = check.failedRegions?.length
               ? ` | failedRegions: ${check.failedRegions.join(", ")}`

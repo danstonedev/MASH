@@ -112,6 +112,8 @@ interface CalibrationState {
   // Subject Scaling
   subjectHeight: number; // in cm
   setSubjectHeight: (heightCm: number) => void;
+  subjectWeight: number; // in kg
+  setSubjectWeight: (weightKg: number) => void;
 
   // Heading Reset
   headingResetOffset: number; // Radians to rotate the entire model (Y-axis)
@@ -246,6 +248,9 @@ export const useCalibrationStore = create<CalibrationState>()(
       subjectHeight: 175, // Default 175cm
       setSubjectHeight: (height) => set({ subjectHeight: height }),
 
+      subjectWeight: 75, // Default 75kg
+      setSubjectWeight: (weight) => set({ subjectWeight: weight }),
+
       headingResetOffset: 0,
       setHeadingResetOffset: (offset) => set({ headingResetOffset: offset }),
 
@@ -369,6 +374,7 @@ export const useCalibrationStore = create<CalibrationState>()(
     }),
     {
       name: "imu-connect-calibration",
+      version: 1,
       // Custom storage with serialization for THREE.Quaternion and Map
       storage: {
         getItem: (name: string) => {
@@ -456,6 +462,7 @@ export const useCalibrationStore = create<CalibrationState>()(
         sensorOffsets: state.sensorOffsets,
         overallQuality: state.overallQuality,
         subjectHeight: state.subjectHeight,
+        subjectWeight: state.subjectWeight,
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as
@@ -475,6 +482,7 @@ export const useCalibrationStore = create<CalibrationState>()(
               : currentState.sensorOffsets,
           overallQuality: persisted?.overallQuality || 0,
           subjectHeight: persisted?.subjectHeight || currentState.subjectHeight,
+          subjectWeight: persisted?.subjectWeight || currentState.subjectWeight,
         };
       },
     },

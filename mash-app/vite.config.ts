@@ -10,6 +10,23 @@ export default defineConfig({
     sourcemap: false,
     minify: "esbuild",
     target: "es2020",
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split heavy vendor libraries into separate cacheable chunks
+          "vendor-three": ["three", "@react-three/fiber", "@react-three/drei"],
+          "vendor-charts": ["recharts"],
+        },
+      },
+    },
+  },
+  esbuild: {
+    // Strip console.log/debug/info in production builds (keep warn/error)
+    drop: process.env.NODE_ENV === "production" ? ["debugger"] : [],
+    pure:
+      process.env.NODE_ENV === "production"
+        ? ["console.log", "console.debug", "console.info"]
+        : [],
   },
   // Resolve aliases for cleaner imports
   resolve: {

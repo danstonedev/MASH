@@ -12,6 +12,7 @@ import { useFirmwareStore } from "./useFirmwareStore";
 import { useOptionalSensorsStore } from "./useOptionalSensorsStore";
 import type { ConnectionType } from "../lib/connection/ConnectionManager";
 import { liveGapFill } from "../analysis/LiveGapFill";
+import { makeDeviceKey } from "../lib/deviceKey";
 
 import {
   syncReadiness,
@@ -674,8 +675,14 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
               }
             }
 
-            // Use deviceId if available (multi-device support), fallback to sensor_N format
-            const deviceKey = pkt.deviceId || `sensor_${pkt.sensorId ?? 0}`;
+            // PHASE-1: Use physical identity key (consistent with SerialConnection)
+            const deviceKey =
+              pkt.deviceId ||
+              makeDeviceKey(
+                (pkt as IMUDataPacket).rawNodeId,
+                (pkt as IMUDataPacket).localSensorIndex,
+                pkt.sensorId ?? 0,
+              );
 
             // PIPELINE FIX: Always increment packet counters at full rate (no throttle)
             // Only throttle the Zustand set() that updates sensor metadata / triggers re-renders
@@ -770,6 +777,9 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
                   node.sensorCount,
                   node.hasBaro,
                   node.hasMag,
+                  // PHASE-1: Pass raw nodeId so NetworkStore can build the
+                  // rawNodeId → compactBase reverse lookup map.
+                  node.nodeId,
                 );
                 networkStore.updateNodeEnvironmental(
                   effectiveId,

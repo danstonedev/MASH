@@ -87,7 +87,9 @@ function fillSensorFrames(
   options: Required<GapFillOptions>,
   framePeriodMs: number,
 ): { frames: GapFilledFrame[]; stats: GapFillSummary["sensors"][number] } {
-  const sorted = [...sensorFrames].sort((a, b) => getFrameNumber(a) - getFrameNumber(b));
+  const sorted = [...sensorFrames].sort(
+    (a, b) => getFrameNumber(a) - getFrameNumber(b),
+  );
 
   let filledFrames = 0;
   let filledGaps = 0;
@@ -136,7 +138,8 @@ function fillSensorFrames(
       !!prev.accelerometer &&
       !!next.accelerometer;
 
-    const canFill = canFillDuration && (!options.requireEndpoints || hasEndpoints);
+    const canFill =
+      canFillDuration && (!options.requireEndpoints || hasEndpoints);
 
     if (!canFill) {
       skippedGaps++;
@@ -149,8 +152,18 @@ function fillSensorFrames(
     longestFilledGapMs = Math.max(longestFilledGapMs, gapDurationMs);
 
     // Prepare quaternions
-    _qPrev.set(prev.quaternion[1], prev.quaternion[2], prev.quaternion[3], prev.quaternion[0]);
-    _qNext.set(next.quaternion[1], next.quaternion[2], next.quaternion[3], next.quaternion[0]);
+    _qPrev.set(
+      prev.quaternion[1],
+      prev.quaternion[2],
+      prev.quaternion[3],
+      prev.quaternion[0],
+    );
+    _qNext.set(
+      next.quaternion[1],
+      next.quaternion[2],
+      next.quaternion[3],
+      next.quaternion[0],
+    );
 
     // Hemisphere check for shortest path
     if (_qPrev.dot(_qNext) < 0) {
@@ -167,9 +180,15 @@ function fillSensorFrames(
 
       const ts = prev.timestamp + k * framePeriodMs;
 
-      const ax = prev.accelerometer[0] + (next.accelerometer[0] - prev.accelerometer[0]) * alpha;
-      const ay = prev.accelerometer[1] + (next.accelerometer[1] - prev.accelerometer[1]) * alpha;
-      const az = prev.accelerometer[2] + (next.accelerometer[2] - prev.accelerometer[2]) * alpha;
+      const ax =
+        prev.accelerometer[0] +
+        (next.accelerometer[0] - prev.accelerometer[0]) * alpha;
+      const ay =
+        prev.accelerometer[1] +
+        (next.accelerometer[1] - prev.accelerometer[1]) * alpha;
+      const az =
+        prev.accelerometer[2] +
+        (next.accelerometer[2] - prev.accelerometer[2]) * alpha;
 
       const gPrev = prev.gyro ?? [0, 0, 0];
       const gNext = next.gyro ?? [0, 0, 0];
@@ -228,7 +247,10 @@ function fillSensorFrames(
   };
 }
 
-export function fillGaps(frames: RecordedFrame[], opts?: GapFillOptions): GapFillResult {
+export function fillGaps(
+  frames: RecordedFrame[],
+  opts?: GapFillOptions,
+): GapFillResult {
   const options: Required<GapFillOptions> = {
     frameRateHz: opts?.frameRateHz ?? 200,
     maxFillGapMs: opts?.maxFillGapMs ?? 100,
@@ -283,8 +305,13 @@ export function fillGaps(frames: RecordedFrame[], opts?: GapFillOptions): GapFil
   return { frames: allOut, summary };
 }
 
-export async function exportGapFilledSession(sessionId: string, opts?: GapFillOptions): Promise<void> {
-  const session = (await dataManager.getSession(sessionId)) as RecordingSession | undefined;
+export async function exportGapFilledSession(
+  sessionId: string,
+  opts?: GapFillOptions,
+): Promise<void> {
+  const session = (await dataManager.getSession(sessionId)) as
+    | RecordingSession
+    | undefined;
   const frames = await dataManager.exportSessionData(sessionId);
 
   const frameRateHz = opts?.frameRateHz ?? session?.sampleRate ?? 200;
@@ -306,8 +333,14 @@ export async function exportGapFilledSession(sessionId: string, opts?: GapFillOp
 // Expose to window for zero-UI usage (DevTools-driven)
 declare global {
   interface Window {
-    __exportGapFilledSession?: (sessionId: string, opts?: GapFillOptions) => Promise<void>;
-    __fillGaps?: (frames: RecordedFrame[], opts?: GapFillOptions) => GapFillResult;
+    __exportGapFilledSession?: (
+      sessionId: string,
+      opts?: GapFillOptions,
+    ) => Promise<void>;
+    __fillGaps?: (
+      frames: RecordedFrame[],
+      opts?: GapFillOptions,
+    ) => GapFillResult;
   }
 }
 

@@ -52,7 +52,7 @@ function setupMockDevices(sensorCount: number = 1): string[] {
   const devices = new Map();
 
   for (let i = 0; i < sensorCount; i++) {
-    const id = `sensor_${i}`;
+    const id = `node_${i}_s0`;
     deviceIds.push(id);
     devices.set(id, {
       id,

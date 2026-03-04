@@ -55,24 +55,24 @@ const GYRO_SATURATION_RAD_S = 68.0;
 // ============================================================================
 
 export const IntegrityFlag = {
-  NONE:           0,
-  NAN_INF:        1 << 0,   // 0x01 — NaN or Infinity in any channel
-  QUAT_DENORM:    1 << 1,   // 0x02 — |q| outside [1 ± tolerance]
-  FROZEN:         1 << 2,   // 0x04 — Same quaternion for N consecutive frames
-  JUMP:           1 << 3,   // 0x08 — Angular delta exceeds threshold
-  ACCEL_RANGE:    1 << 4,   // 0x10 — |accel| > physical sensor limit
-  GYRO_SATURATED: 1 << 5,   // 0x20 — Gyro axis at full-scale
+  NONE: 0,
+  NAN_INF: 1 << 0, // 0x01 — NaN or Infinity in any channel
+  QUAT_DENORM: 1 << 1, // 0x02 — |q| outside [1 ± tolerance]
+  FROZEN: 1 << 2, // 0x04 — Same quaternion for N consecutive frames
+  JUMP: 1 << 3, // 0x08 — Angular delta exceeds threshold
+  ACCEL_RANGE: 1 << 4, // 0x10 — |accel| > physical sensor limit
+  GYRO_SATURATED: 1 << 5, // 0x20 — Gyro axis at full-scale
 } as const;
 
 export type IntegrityFlags = number; // Bitwise OR of IntegrityFlag values
 
 /** Human-readable labels keyed by flag bit position */
 export const IntegrityFlagLabels: Record<number, string> = {
-  [IntegrityFlag.NAN_INF]:        "NaN/Infinity",
-  [IntegrityFlag.QUAT_DENORM]:    "Quat denormalized",
-  [IntegrityFlag.FROZEN]:         "Frozen sensor",
-  [IntegrityFlag.JUMP]:           "Orientation jump",
-  [IntegrityFlag.ACCEL_RANGE]:    "Accel out-of-range",
+  [IntegrityFlag.NAN_INF]: "NaN/Infinity",
+  [IntegrityFlag.QUAT_DENORM]: "Quat denormalized",
+  [IntegrityFlag.FROZEN]: "Frozen sensor",
+  [IntegrityFlag.JUMP]: "Orientation jump",
+  [IntegrityFlag.ACCEL_RANGE]: "Accel out-of-range",
   [IntegrityFlag.GYRO_SATURATED]: "Gyro saturated",
 };
 
@@ -116,7 +116,10 @@ export interface IntegritySummary {
   /** Counts per flag type (keyed by IntegrityFlag value) */
   flagCounts: Record<number, number>;
   /** Per-sensor flag counts */
-  perSensor: Map<number, { checked: number; flagged: number; flags: Record<number, number> }>;
+  perSensor: Map<
+    number,
+    { checked: number; flagged: number; flags: Record<number, number> }
+  >;
 }
 
 // ============================================================================
@@ -144,15 +147,22 @@ export class SensorIntegrityMonitor {
 
     // ------ 1. NaN / Infinity -----------------------------------------------
     if (
-      !isFinite(q[0]) || !isFinite(q[1]) || !isFinite(q[2]) || !isFinite(q[3]) ||
-      !isFinite(a[0]) || !isFinite(a[1]) || !isFinite(a[2]) ||
+      !isFinite(q[0]) ||
+      !isFinite(q[1]) ||
+      !isFinite(q[2]) ||
+      !isFinite(q[3]) ||
+      !isFinite(a[0]) ||
+      !isFinite(a[1]) ||
+      !isFinite(a[2]) ||
       (g && (!isFinite(g[0]) || !isFinite(g[1]) || !isFinite(g[2])))
     ) {
       flags |= IntegrityFlag.NAN_INF;
     }
 
     // ------ 2. Quaternion normalization -------------------------------------
-    const qNorm = Math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    const qNorm = Math.sqrt(
+      q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3],
+    );
     if (Math.abs(qNorm - 1.0) > QUAT_NORM_TOLERANCE) {
       flags |= IntegrityFlag.QUAT_DENORM;
     }
@@ -176,7 +186,10 @@ export class SensorIntegrityMonitor {
 
       if (identical) {
         state.frozenCount++;
-        if (state.frozenCount >= FROZEN_FRAME_THRESHOLD && !state.frozenFlagged) {
+        if (
+          state.frozenCount >= FROZEN_FRAME_THRESHOLD &&
+          !state.frozenFlagged
+        ) {
           flags |= IntegrityFlag.FROZEN;
           state.frozenFlagged = true;
         }
@@ -197,7 +210,10 @@ export class SensorIntegrityMonitor {
       }
 
       // Update stored quaternion
-      pq[0] = q[0]; pq[1] = q[1]; pq[2] = q[2]; pq[3] = q[3];
+      pq[0] = q[0];
+      pq[1] = q[1];
+      pq[2] = q[2];
+      pq[3] = q[3];
     }
 
     // ------ 5. Accelerometer range ------------------------------------------
@@ -210,8 +226,8 @@ export class SensorIntegrityMonitor {
     if (
       g &&
       (Math.abs(g[0]) >= GYRO_SATURATION_RAD_S ||
-       Math.abs(g[1]) >= GYRO_SATURATION_RAD_S ||
-       Math.abs(g[2]) >= GYRO_SATURATION_RAD_S)
+        Math.abs(g[1]) >= GYRO_SATURATION_RAD_S ||
+        Math.abs(g[2]) >= GYRO_SATURATION_RAD_S)
     ) {
       flags |= IntegrityFlag.GYRO_SATURATED;
     }
@@ -222,7 +238,8 @@ export class SensorIntegrityMonitor {
       this.summary.totalFlagged++;
       for (const flagVal of FLAG_VALUES) {
         if (flags & flagVal) {
-          this.summary.flagCounts[flagVal] = (this.summary.flagCounts[flagVal] || 0) + 1;
+          this.summary.flagCounts[flagVal] =
+            (this.summary.flagCounts[flagVal] || 0) + 1;
         }
       }
 
@@ -247,7 +264,12 @@ export class SensorIntegrityMonitor {
     }
     ps.checked++;
 
-    return { flags, angularDeltaRad: angularDelta, quatNorm: qNorm, accelMag: aMag };
+    return {
+      flags,
+      angularDeltaRad: angularDelta,
+      quatNorm: qNorm,
+      accelMag: aMag,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -266,16 +288,26 @@ export class SensorIntegrityMonitor {
     totalChecked: number;
     totalFlagged: number;
     flagCounts: Record<string, number>;
-    perSensor: Record<string, { checked: number; flagged: number; flags: Record<string, number> }>;
+    perSensor: Record<
+      string,
+      { checked: number; flagged: number; flags: Record<string, number> }
+    >;
   } {
-    const perSensor: Record<string, { checked: number; flagged: number; flags: Record<string, number> }> = {};
+    const perSensor: Record<
+      string,
+      { checked: number; flagged: number; flags: Record<string, number> }
+    > = {};
     for (const [sid, stats] of this.summary.perSensor) {
       const flagsLabeled: Record<string, number> = {};
       for (const [fv, count] of Object.entries(stats.flags)) {
         const label = IntegrityFlagLabels[Number(fv)] || `flag_${fv}`;
         flagsLabeled[label] = count;
       }
-      perSensor[String(sid)] = { checked: stats.checked, flagged: stats.flagged, flags: flagsLabeled };
+      perSensor[String(sid)] = {
+        checked: stats.checked,
+        flagged: stats.flagged,
+        flags: flagsLabeled,
+      };
     }
 
     const flagCounts: Record<string, number> = {};

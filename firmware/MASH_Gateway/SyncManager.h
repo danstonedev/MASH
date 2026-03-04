@@ -40,16 +40,17 @@ typedef std::function<void()> NodePrunedCallback;
 // ============================================================================
 struct TDMANodeInfo
 {
-  uint8_t nodeId;        // Node's unique ID
-  uint8_t sensorCount;   // Number of sensors on this node
-  bool hasMag;           // Has magnetometer
-  bool hasBaro;          // Has barometer
-  char nodeName[16];     // Human-readable name
-  uint16_t slotOffsetUs; // Assigned slot offset from beacon
-  uint16_t slotWidthUs;  // Assigned slot width
-  uint32_t lastHeard;    // millis() when last heard from
-  bool registered;       // Is this slot active?
-  uint8_t mac[6];        // MAC address for collision detection
+  uint8_t nodeId;              // Node's unique ID
+  uint8_t sensorCount;         // Number of sensors on this node
+  bool hasMag;                 // Has magnetometer
+  bool hasBaro;                // Has barometer
+  char nodeName[16];           // Human-readable name
+  uint16_t slotOffsetUs;       // Assigned slot offset from beacon
+  uint16_t slotWidthUs;        // Assigned slot width
+  uint32_t lastHeard;          // millis() when last heard from
+  bool registered;             // Is this slot active?
+  uint8_t mac[6];              // MAC address for collision detection
+  uint32_t lastScheduleSentMs; // V4-FIX: Per-node schedule resend rate limiting
 };
 
 class SyncManager
@@ -262,7 +263,9 @@ private:
   // 10s provides margin for RF propagation delays and retransmissions
   static const uint32_t DISCOVERY_DURATION_MS = 10000; // Was: 3000
   static const uint32_t SHORT_DISCOVERY_MS =
-      3000;                       // OPP-8: shortened when pre-registered nodes exist
+      8000;                       // V3-FIX: Was 3000 — too short for 6-node boot.
+                                  // Nodes scan 11 ch × 500ms = 5.5s minimum.
+                                  // 8s gives margin for RF delays + retransmissions.
   uint8_t preRegisteredNodeCount; // OPP-8: count loaded from NVS
 
   // ============================================================================

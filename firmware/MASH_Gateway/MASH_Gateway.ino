@@ -1373,6 +1373,67 @@ void loop()
 
   processSerialCommands();
 
+  // ============================================================================
+  // P2-FIX: GPIO0 BOOT BUTTON — Double-Press to TDMA Re-Scan
+  // ============================================================================
+  // Gives the user a physical way to force node rediscovery without the webapp.
+  // Single press: ignored (avoids accidental triggers).
+  // Double press (<500ms between releases): full TDMA rescan.
+  // The safe-boot HOLD check in setup() prevents conflict.
+  // ============================================================================
+  {
+    static bool lastButtonState = HIGH; // Pull-up: HIGH = released
+    static uint32_t lastReleaseTime = 0;
+    static uint8_t pressCount = 0;
+    static uint32_t lastRescanTrigger = 0;
+
+    bool currentState = digitalRead(SAFE_BOOT_PIN);
+
+    // Detect button release (HIGH after being LOW)
+    if (lastButtonState == LOW && currentState == HIGH)
+    {
+      uint32_t now = millis();
+      if (now - lastReleaseTime < 500)
+      {
+        pressCount++;
+      }
+      else
+      {
+        pressCount = 1; // First press of a new sequence
+      }
+      lastReleaseTime = now;
+
+      if (pressCount >= 2)
+      {
+        // Double-press detected — trigger rescan (debounce: min 5s between rescans)
+        if (now - lastRescanTrigger > 5000)
+        {
+          lastRescanTrigger = now;
+          pressCount = 0;
+          Serial.println("[GPIO0] Double-press detected! Triggering TDMA Re-Scan...");
+
+          // Visual feedback: rapid orange blink
+          if (boardHasNeoPixel)
+          {
+            for (int blink = 0; blink < 3; blink++)
+            {
+              statusLED.setPixelColor(0, statusLED.Color(255, 100, 0));
+              statusLED.show();
+              delay(100);
+              statusLED.setPixelColor(0, statusLED.Color(0, 0, 0));
+              statusLED.show();
+              delay(100);
+            }
+          }
+
+          syncManager.restartDiscovery();
+        }
+      }
+    }
+    lastButtonState = currentState;
+  }
+  // ============================================================================
+
   // Keepalive via normal queued JSON path (single writer through SerialTxTask).
   // Avoid direct FIFO writes here to prevent interleaving with queued sync
   // frames.
@@ -1546,9 +1607,11 @@ void loop()
       // show registered/expected sensors, not a transient "active in last 3s" snapshot.
       ds.nodeCount = syncManager.getRegisteredNodeCount();
 
-      uint8_t expectedSensorIds[MAX_SENSORS];
+      // V6-FIX: Was MAX_SENSORS (8) — truncated 15 sensors to 8 on display.
+      // Use SYNC_MAX_SENSORS (20) to support up to 20 sensors across all nodes.
+      uint8_t expectedSensorIds[SYNC_MAX_SENSORS];
       uint8_t displaySensorCount =
-          syncManager.getExpectedSensorIds(expectedSensorIds, MAX_SENSORS);
+          syncManager.getExpectedSensorIds(expectedSensorIds, SYNC_MAX_SENSORS);
 
       if (useSyncFrameMode && syncFrameBufferInitialized)
       {

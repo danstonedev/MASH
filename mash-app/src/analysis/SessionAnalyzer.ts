@@ -14,6 +14,7 @@
 import * as THREE from "three";
 import { dataManager, type RecordedFrame } from "../lib/db";
 import { useSensorAssignmentStore } from "../store/useSensorAssignmentStore";
+import { useDeviceRegistry } from "../store/useDeviceRegistry";
 import {
   extractFeatures,
   classifyActivity,
@@ -551,14 +552,15 @@ export class SessionAnalyzer {
           .assignments as Map<string, { segmentId: string }>;
         const dataSensorIds = new Set(frames.map((f) => f.sensorId));
 
+        const deviceRegistry = useDeviceRegistry.getState().devices;
         assignments.forEach((a, deviceId) => {
-          // Try to match by trailing numeric ID
-          const match = String(deviceId).match(/(\d+)$/);
-          if (match) {
-            const numId = parseInt(match[1], 10);
-            if (dataSensorIds.has(numId)) {
-              segments.add(a.segmentId.toLowerCase());
-            }
+          // Look up the compact ID from device registry
+          const dev = deviceRegistry.get(deviceId);
+          if (
+            dev?.packetSensorId !== undefined &&
+            dataSensorIds.has(dev.packetSensorId)
+          ) {
+            segments.add(a.segmentId.toLowerCase());
           }
         });
       } catch {

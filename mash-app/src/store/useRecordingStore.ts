@@ -21,6 +21,7 @@ import {
   type SerializedCalibrationOffset,
 } from "../lib/db";
 import { buildRecordingCsv } from "../lib/export/buildRecordingCsv";
+import { makeDeviceKey } from "../lib/deviceKey";
 import { useDeviceRegistry } from "./useDeviceRegistry";
 import { useCalibrationStore } from "./useCalibrationStore";
 import { useSensorAssignmentStore } from "./useSensorAssignmentStore";
@@ -184,29 +185,32 @@ function captureTareStates(): {
 
 /**
  * Capture current sensor-to-segment mapping from assignment store.
+ *
+ * The recording stores each sample's COMPACT sensorId (from packet.sensorId).
+ * During playback, samples are looked up by that same compact ID.
+ * So we must key the mapping by compact sensorId, NOT by device key string.
+ *
+ * For physical-key devices: the device key is "node_44_s0" but the compact
+ * sensorId (e.g. 1) is what's stored in each recorded frame. We look up
+ * the segment via the assignment store using the device key, then store
+ * it under the compact sensorId for playback compatibility.
  */
 function captureSensorMapping(): Record<number, string> {
   const devices = useDeviceRegistry.getState().devices;
   const { getSegmentForSensor } = useSensorAssignmentStore.getState();
   const mapping: Record<number, string> = {};
 
-  devices.forEach((device, id) => {
-    const segment = getSegmentForSensor(device.id);
-    if (segment) {
-      // Device IDs can be:
-      // - "sensor_204" → extract 204
-      // - "USB 239a:8143_190" → extract 190 (trailing number after underscore)
-      // We need the TRAILING numeric suffix, not all digits concatenated
-      const idStr = String(id);
-      const match = idStr.match(/(\d+)$/); // Match trailing digits
-      const sensorId = match ? parseInt(match[1], 10) : NaN;
+  devices.forEach((device, deviceKey) => {
+    const segment = getSegmentForSensor(deviceKey);
+    if (!segment) return;
 
-      if (!isNaN(sensorId) && sensorId >= 0) {
-        mapping[sensorId] = segment;
-        console.debug(
-          `[captureSensorMapping] ${id} -> numeric ${sensorId} -> ${segment}`,
-        );
-      }
+    // The compact sensorId is stored on the DeviceData itself (from packets).
+    const compactId = device.packetSensorId;
+    if (compactId !== undefined && compactId >= 0) {
+      mapping[compactId] = segment;
+      console.debug(
+        `[captureSensorMapping] ${deviceKey} -> compact ${compactId} -> ${segment}`,
+      );
     }
   });
 
@@ -991,8 +995,13 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     // Look up segment from session's sensor mapping
     const segment = currentSession.sensorMapping?.[sensorId];
 
-    // Look up sensor name from registry (id must be string)
-    const device = useDeviceRegistry.getState().devices.get(String(sensorId));
+    // Look up sensor name from registry using canonical device key
+    const deviceKey = makeDeviceKey(
+      packet.rawNodeId,
+      packet.localSensorIndex,
+      sensorId,
+    );
+    const device = useDeviceRegistry.getState().devices.get(deviceKey);
     const sensorName = device?.name;
 
     // =========================================================================

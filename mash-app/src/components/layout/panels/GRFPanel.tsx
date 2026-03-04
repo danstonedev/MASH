@@ -63,7 +63,7 @@ export function GRFPanel() {
 
     // Get subject height/weight from calibration store
     const subjectHeight = useCalibrationStore(s => s.subjectHeight);
-    const subjectWeight = 75;  // TODO: Add weight to calibration store
+    const subjectWeight = useCalibrationStore(s => s.subjectWeight);
 
     // Initialize engine when height changes
     useEffect(() => {

@@ -151,7 +151,7 @@ enum DeviceRole
 // ============================================================================
 
 #ifndef DEBUG_LEVEL
-#define DEBUG_LEVEL 1 // 0=Off, 1=Errors, 2=Warnings, 3=Info, 4=Verbose
+#define DEBUG_LEVEL 0 // 0=Off, 1=Errors, 2=Warnings, 3=Info, 4=Verbose
 #endif
 
 // Debug macros

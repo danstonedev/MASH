@@ -551,7 +551,8 @@ void DataIngestionTask(void *param)
                         }
 
                         bool added = syncFrameBuffer.addSample(
-                            compactSensorId, sample->timestampUs, frameNumber,
+                            compactSensorId, tdmaV1->nodeId, sensorIdx,
+                            sample->timestampUs, frameNumber,
                             sample->q, sample->a, sample->g);
                         if (ns)
                         {
@@ -613,7 +614,8 @@ void DataIngestionTask(void *param)
                             }
 
                             bool added = syncFrameBuffer.addSample(
-                                compactSensorId, sample->timestampUs,
+                                compactSensorId, nodeIdOut, sensorIdx,
+                                sample->timestampUs,
                                 frameNumberOut, sample->q, sample->a,
                                 sample->g);
                             if (ns)

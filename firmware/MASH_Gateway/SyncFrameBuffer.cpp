@@ -145,7 +145,9 @@ void SyncFrameBuffer::setExpectedSensors(const uint8_t *sensorIds,
 // Sample Ingestion
 // ============================================================================
 
-bool SyncFrameBuffer::addSample(uint8_t sensorId, uint32_t timestampUs,
+bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
+                                uint8_t localSensorIndex,
+                                uint32_t timestampUs,
                                 uint32_t frameNumber, const int16_t *q,
                                 const int16_t *a, const int16_t *g)
 {
@@ -446,6 +448,8 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint32_t timestampUs,
   SyncSensorSample &sample = slot->sensors[sensorIndex];
   sample.present = true;
   sample.sensorId = sensorId;
+  sample.rawNodeId = rawNodeId;               // S1-FIX: Physical identity
+  sample.localSensorIndex = localSensorIndex; // S1-FIX: Local sensor index
   memcpy(sample.q, q, sizeof(sample.q));
   memcpy(sample.a, a, sizeof(sample.a));
   memcpy(sample.g, g, sizeof(sample.g));
@@ -1120,8 +1124,13 @@ size_t SyncFrameBuffer::buildAbsoluteFrame(const SyncTimestampSlot &slot,
     memcpy(sensorData[outIdx].a, sample.a, sizeof(sensorData[outIdx].a));
     memcpy(sensorData[outIdx].g, sample.g, sizeof(sensorData[outIdx].g));
     sensorData[outIdx].flags = sample.present ? SYNC_SENSOR_FLAG_VALID : 0;
-    sensorData[outIdx].reserved[0] = 0;
-    sensorData[outIdx].reserved[1] = 0;
+    // S1-FIX: Embed physical identity in previously-reserved bytes
+    // reserved[0] = rawNodeId (MAC-derived physical node ID)
+    // reserved[1] = localSensorIndex (sensor's index within its node, 0-based)
+    // This allows the webapp to build stable device keys independent of
+    // compact ID assignment order.
+    sensorData[outIdx].reserved[0] = sample.present ? sample.rawNodeId : 0;
+    sensorData[outIdx].reserved[1] = sample.present ? sample.localSensorIndex : 0;
   }
 
   // Append CRC-8 trailing byte for corruption detection.

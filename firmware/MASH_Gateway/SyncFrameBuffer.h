@@ -157,6 +157,8 @@ struct SyncSensorSample
 {
     bool present; // Has this sensor reported for this timestamp?
     uint8_t sensorId;
+    uint8_t rawNodeId;        // S1-FIX: Physical node ID (MAC-derived) for identity tracking
+    uint8_t localSensorIndex; // S1-FIX: Sensor's local index within its node (0-based)
     int16_t q[4];
     int16_t a[3];
     int16_t g[3];
@@ -198,7 +200,9 @@ public:
 
     /**
      * Add a sample from a node
-     * @param sensorId Sensor ID (nodeId + localIndex)
+     * @param sensorId Sensor ID (compact, sequential)
+     * @param rawNodeId Physical node ID (MAC-derived) for identity tracking
+     * @param localSensorIndex Sensor's local index within its node (0-based)
      * @param timestampUs Synchronized timestamp
      * @param frameNumber Frame number from packet
      * @param q Quaternion data
@@ -208,6 +212,8 @@ public:
      */
     bool addSample(
         uint8_t sensorId,
+        uint8_t rawNodeId,
+        uint8_t localSensorIndex,
         uint32_t timestampUs,
         uint32_t frameNumber,
         const int16_t *q,

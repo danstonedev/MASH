@@ -442,6 +442,7 @@ export const useTareStore = create<TareStoreState>()(
     }),
     {
       name: "tare-storage",
+      version: 1,
       storage: createJSONStorage(() => localStorage),
 
       // Custom serialization: Store as { serialized: SerializedTareState[] }

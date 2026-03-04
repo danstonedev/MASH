@@ -36,6 +36,7 @@ export interface AxisConfig {
 // import * as THREE from "three"; // REMOVED UNUSED
 import { useNetworkStore } from "./useNetworkStore";
 import type { IMUDataPacket } from "../lib/ble/DeviceInterface";
+import { makeDeviceKey } from "../lib/deviceKey";
 import {
   STALE_THRESHOLD_MS,
   OFFLINE_THRESHOLD_MS,
@@ -242,6 +243,13 @@ export interface DeviceData {
   lastTapTime?: number; // Timestamp of last detected tap (High G event)
   isStationary?: boolean; // New: True if device is holding still
   format?: string; // Detection: Packet format ID
+  // S5-FIX: Physical sensor identity from firmware reserved bytes
+  rawNodeId?: number; // ESP-NOW nodeId (MAC-derived, 0 = legacy/unknown)
+  localSensorIndex?: number; // Sensor index within the node (0-based)
+  // PHASE-2: Compact sensor ID from packet (gateway-assigned, 1-byte).
+  // Stored separately from the device key because physical keys (node_X_sY)
+  // don't embed the compact ID. Needed for recording sensorMapping.
+  packetSensorId?: number;
 }
 
 // Sensor Transform: Offset from bone origin
@@ -753,14 +761,25 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                 const transforms = { ...state.sensorTransforms };
                 let changed = false;
 
+                // PHASE-2: Include physical key candidates for calibration reset.
+                // NodeInfo gives us compactBase (sensorIdOffset), but we need
+                // rawNodeId for physical keys. Look it up from the network store.
+                const networkState = useNetworkStore.getState();
+                const nodeEntry = networkState.nodes.get(sensorIdOffset);
+                const rawNid = nodeEntry?.rawNodeId;
+
                 for (let i = 0; i < sensorCount; i++) {
                   const sId = sensorIdOffset + i;
-                  // Construct likely device IDs
-                  const candidates = [
-                    `${gatewayName}_${sId}`, // Standard Gateway format
-                    `Sensor ${sId}`, // Direct connection or legacy
-                    `sensor_${sId}`, // Store internal fallback
-                  ];
+                  // Construct device key candidates for calibration reset
+                  const candidates: string[] = [];
+
+                  // Physical key (primary)
+                  if (rawNid && rawNid > 0) {
+                    candidates.push(`node_${rawNid}_s${i}`);
+                  }
+
+                  // Gateway format (connection-layer ID)
+                  candidates.push(`${gatewayName}_${sId}`);
 
                   candidates.forEach((candId) => {
                     // CRITICAL: Only reset calibration if the device is NEW to the registry (Reconnect/Reboot)
@@ -813,8 +832,40 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
               }
             }
 
-            // Use deviceId if provided (multi-device support), fallback to sensorId string
-            const deviceId = data.deviceId || `sensor_${packetSensorId}`;
+            // PHASE-1: Use physical identity key when available.
+            // SerialConnection already sets data.deviceId via makeDeviceKey(),
+            // but if the packet arrives without a deviceId (e.g. direct BLE),
+            // construct it here from the IMUDataPacket fields.
+            const imuForIdentity = data as IMUDataPacket;
+            const deviceId =
+              data.deviceId ||
+              makeDeviceKey(
+                imuForIdentity.rawNodeId,
+                imuForIdentity.localSensorIndex,
+                packetSensorId,
+              );
+
+            // PHASE-1: Log identity changes if a physical sensor swaps behind a key.
+            // With physical keying this is rare (would require MAC collision), but
+            // still valuable for debugging firmware issues.
+            if (imuForIdentity.rawNodeId && imuForIdentity.rawNodeId > 0) {
+              const existingDevice = devices.get(deviceId);
+              if (
+                existingDevice &&
+                existingDevice.rawNodeId &&
+                existingDevice.rawNodeId > 0 &&
+                (existingDevice.rawNodeId !== imuForIdentity.rawNodeId ||
+                  existingDevice.localSensorIndex !==
+                    imuForIdentity.localSensorIndex)
+              ) {
+                console.warn(
+                  `[DeviceRegistry] Physical sensor identity CHANGED for ${deviceId}: ` +
+                    `was node=${existingDevice.rawNodeId}/s${existingDevice.localSensorIndex}, ` +
+                    `now node=${imuForIdentity.rawNodeId}/s${imuForIdentity.localSensorIndex}. ` +
+                    `Calibration data for this slot may be stale.`,
+                );
+              }
+            }
 
             // NOTE: sensorId 0 is now VALID for multi-sensor multiplexer nodes
             // Ghost sensor filtering moved to IMUParser where CRC + sanity checks catch corrupted packets
@@ -1249,18 +1300,28 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
 
                 const networkState = useNetworkStore.getState();
 
-                const nodeName =
-                  sensorId !== undefined
+                // PHASE-1: Prefer rawNodeId-based lookups for physical identity,
+                // fall back to compact-ID lookups for legacy firmware.
+                const rawNid = realData.rawNodeId;
+                const localIdx = realData.localSensorIndex;
+                const hasPhysicalId = rawNid !== undefined && rawNid > 0;
+
+                const nodeName = hasPhysicalId
+                  ? networkState.getNodeNameByRawId(rawNid)
+                  : sensorId !== undefined
                     ? networkState.getNodeNameForSensor(sensorId)
                     : null;
 
-                const nodeSensorCount =
-                  sensorId !== undefined
+                const nodeSensorCount = hasPhysicalId
+                  ? networkState.getNodeSensorCountByRawId(rawNid)
+                  : sensorId !== undefined
                     ? networkState.getNodeSensorCount(sensorId)
                     : undefined;
 
-                const relativeIndex =
-                  sensorId !== undefined
+                // For physical keys, localSensorIndex IS the relative index
+                const relativeIndex = hasPhysicalId
+                  ? (localIdx ?? 0)
+                  : sensorId !== undefined
                     ? networkState.getSensorRelativeIndex(sensorId)
                     : null;
 
@@ -1326,6 +1387,12 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                 (realData as any)._tapTimestamp || existing?.lastTapTime || 0,
               isStationary: isStationary,
               format: realData.format || existing?.format,
+              // S5-FIX: Carry physical identity (0 = legacy firmware)
+              rawNodeId: realData.rawNodeId ?? existing?.rawNodeId,
+              localSensorIndex:
+                realData.localSensorIndex ?? existing?.localSensorIndex,
+              // PHASE-2: Store compact sensor ID for recording sensorMapping
+              packetSensorId: packetSensorId ?? existing?.packetSensorId,
             });
 
             return { devices };
@@ -1389,6 +1456,7 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
     },
     {
       name: "device-registry-storage",
+      version: 1,
       storage: createJSONStorage(() => localStorage), // Switch to localStorage for better persistence
       partialize: (state) => ({
         activeTemplate: state.activeTemplate,
@@ -1406,6 +1474,11 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
           if (error) {
             console.error("[DeviceRegistry] Hydration failed:", error);
           } else {
+            // NOTE: Legacy persisted data may contain `sensor_N` keys in
+            // sensorTransforms/axisConfig/sensorScales/gyroBias. These are
+            // harmless dead entries — physical keys (node_X_sY) get fresh
+            // calibration. We cannot reliably migrate old → new because the
+            // compact→physical mapping isn't available until sensors connect.
             console.debug("[DeviceRegistry] Rehydrated state:", {
               transformsCount: Object.keys(
                 rehydratedState?.sensorTransforms || {},

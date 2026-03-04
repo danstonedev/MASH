@@ -120,7 +120,10 @@ export interface RecordingSession {
       totalChecked: number;
       totalFlagged: number;
       flagCounts: Record<string, number>;
-      perSensor: Record<string, { checked: number; flagged: number; flags: Record<string, number> }>;
+      perSensor: Record<
+        string,
+        { checked: number; flagged: number; flags: Record<string, number> }
+      >;
     };
   };
 

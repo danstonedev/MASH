@@ -931,9 +931,13 @@ void DisplayManager::update(const DisplayStatus &s)
     if (!_initialized)
         return;
 
-    // Do a single full redraw on first update only.
-    // Repainting the whole screen every 5s causes visible flicker on ST7789.
-    bool fullRedraw = (_lastFullRedraw == 0);
+    // V7-FIX: Was (_lastFullRedraw == 0) — only one full repaint ever.
+    // Display corruption from SPI glitches, EMI, or partial updates could
+    // never self-heal. Now we force a full redraw every 30s as well.
+    // 30s is long enough to avoid visible flicker during normal operation
+    // but short enough to recover from transient corruption.
+    bool fullRedraw = (_lastFullRedraw == 0) ||
+                      (millis() - _lastFullRedraw > 30000);
 
     if (fullRedraw)
     {

@@ -95,21 +95,21 @@ export type TimelineGateTier = "green" | "yellow" | "red";
 
 /** Max skew thresholds (ms) for dual-sensor timeline pairs */
 export const TIMELINE_SKEW_TIERS = {
-  green: 12,   // ≤12 ms: accept unconditionally
-  yellow: 20,  // ≤20 ms: accept with downgraded trust
+  green: 12, // ≤12 ms: accept unconditionally
+  yellow: 20, // ≤20 ms: accept with downgraded trust
   // >20 ms: red — fail the dual-sensor step
 } as const;
 
 /** Dropped pair ratio thresholds */
 export const TIMELINE_DROP_TIERS = {
-  green: 0.05,  // ≤5%: accept
-  yellow: 0.10, // ≤10%: accept with warning
+  green: 0.05, // ≤5%: accept
+  yellow: 0.1, // ≤10%: accept with warning
   // >10%: red — fail
 } as const;
 
 /** Interpolation ratio thresholds */
 export const TIMELINE_INTERP_TIERS = {
-  green: 0.20,  // ≤20%: accept
+  green: 0.2, // ≤20%: accept
   yellow: 0.35, // ≤35%: accept with warning
   // >35%: red — fail
 } as const;
@@ -129,28 +129,40 @@ export function evaluateTimelineGateTier(
   // Skew
   if (maxSkewMs > TIMELINE_SKEW_TIERS.yellow) {
     tier = "red";
-    reasons.push(`max skew ${maxSkewMs.toFixed(1)}ms > ${TIMELINE_SKEW_TIERS.yellow}ms`);
+    reasons.push(
+      `max skew ${maxSkewMs.toFixed(1)}ms > ${TIMELINE_SKEW_TIERS.yellow}ms`,
+    );
   } else if (maxSkewMs > TIMELINE_SKEW_TIERS.green) {
     if (tier !== "red") tier = "yellow";
-    reasons.push(`max skew ${maxSkewMs.toFixed(1)}ms > ${TIMELINE_SKEW_TIERS.green}ms`);
+    reasons.push(
+      `max skew ${maxSkewMs.toFixed(1)}ms > ${TIMELINE_SKEW_TIERS.green}ms`,
+    );
   }
 
   // Dropped
   if (droppedRatio > TIMELINE_DROP_TIERS.yellow) {
     tier = "red";
-    reasons.push(`dropped ratio ${(droppedRatio * 100).toFixed(1)}% > ${TIMELINE_DROP_TIERS.yellow * 100}%`);
+    reasons.push(
+      `dropped ratio ${(droppedRatio * 100).toFixed(1)}% > ${TIMELINE_DROP_TIERS.yellow * 100}%`,
+    );
   } else if (droppedRatio > TIMELINE_DROP_TIERS.green) {
     if (tier !== "red") tier = "yellow";
-    reasons.push(`dropped ratio ${(droppedRatio * 100).toFixed(1)}% > ${TIMELINE_DROP_TIERS.green * 100}%`);
+    reasons.push(
+      `dropped ratio ${(droppedRatio * 100).toFixed(1)}% > ${TIMELINE_DROP_TIERS.green * 100}%`,
+    );
   }
 
   // Interpolation
   if (interpolationRatio > TIMELINE_INTERP_TIERS.yellow) {
     tier = "red";
-    reasons.push(`interpolation ratio ${(interpolationRatio * 100).toFixed(1)}% > ${TIMELINE_INTERP_TIERS.yellow * 100}%`);
+    reasons.push(
+      `interpolation ratio ${(interpolationRatio * 100).toFixed(1)}% > ${TIMELINE_INTERP_TIERS.yellow * 100}%`,
+    );
   } else if (interpolationRatio > TIMELINE_INTERP_TIERS.green) {
     if (tier !== "red") tier = "yellow";
-    reasons.push(`interpolation ratio ${(interpolationRatio * 100).toFixed(1)}% > ${TIMELINE_INTERP_TIERS.green * 100}%`);
+    reasons.push(
+      `interpolation ratio ${(interpolationRatio * 100).toFixed(1)}% > ${TIMELINE_INTERP_TIERS.green * 100}%`,
+    );
   }
 
   return { tier, reasons };
@@ -188,7 +200,13 @@ export function assessCalibrationTrust(input: {
   timelineTier: TimelineGateTier | null;
   overallQuality: number;
 }): TrustAssessment {
-  const { gatesPassed, poseCheckStatus, squatCheckStatus, timelineTier, overallQuality } = input;
+  const {
+    gatesPassed,
+    poseCheckStatus,
+    squatCheckStatus,
+    timelineTier,
+    overallQuality,
+  } = input;
   const reasons: string[] = [];
 
   if (!gatesPassed) {
@@ -254,7 +272,10 @@ export const CALIBRATION_VERSION = "2.1.0";
 // ============================================================================
 
 /** Segment-specific retry guidance when static capture fails. */
-export function getStaticCaptureRetryHint(segment: string, failReason: string): string {
+export function getStaticCaptureRetryHint(
+  segment: string,
+  failReason: string,
+): string {
   const base = `Hold completely still for 1 second`;
 
   if (failReason.includes("gyro") || failReason.includes("movement")) {

@@ -8,6 +8,7 @@ import { RingBuffer } from "./RingBuffer";
 import { reportSerialLoss } from "./SyncedSampleStats";
 import { useOptionalSensorsStore } from "../../store/useOptionalSensorsStore";
 import { useNetworkStore } from "../../store/useNetworkStore";
+import { makeDeviceKey } from "../deviceKey";
 
 // Espressif VID — the USB Serial/JTAG hardware controller (ARDUINO_USB_MODE=1)
 // always uses Espressif's VID regardless of the board manufacturer.
@@ -769,7 +770,13 @@ export class SerialConnection implements IConnection {
     if (imuPackets.length > 0) {
       const prefixedPackets = imuPackets.map((p) => ({
         ...p,
-        deviceId: `sensor_${p.sensorId ?? 0}`,
+        // PHASE-1: Use physical identity key when firmware provides rawNodeId,
+        // fall back to compact-ID key for legacy firmware (rawNodeId=0/undefined).
+        deviceId: makeDeviceKey(
+          p.rawNodeId,
+          p.localSensorIndex,
+          p.sensorId ?? 0,
+        ),
         sourceGateway: deviceName,
       }));
       this._onData?.(prefixedPackets);
