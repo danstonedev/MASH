@@ -7,7 +7,6 @@ import { JitterBuffer } from "../lib/connection/JitterBuffer";
 // ============================================================================
 
 // Scaling constants matching firmware
-const QUAT_SCALE = 16384;
 const ACCEL_SCALE = 100; // m/s²
 const GYRO_SCALE = 900; // rad/s
 
@@ -52,13 +51,12 @@ function calculateCRC8(data: Uint8Array, length: number): number {
  *   [5-8]: Timestamp in microseconds (uint32 LE)
  *   [9]: Sensor count
  *
- * Per-sensor data (24 bytes each):
+ * Per-sensor data (16 bytes each):
  *   [0]: Sensor ID
- *   [1-8]: Quaternion (4x int16 LE) - w,x,y,z scaled by 16384
- *   [9-14]: Accelerometer (3x int16 LE) - scaled by 100 (m/s²)
- *   [15-20]: Gyroscope (3x int16 LE) - scaled by 900 (rad/s)
- *   [21]: Flags (reserved)
- *   [22-23]: Padding (reserved)
+ *   [1-6]: Accelerometer (3x int16 LE) - scaled by 100 (m/s²)
+ *   [7-12]: Gyroscope (3x int16 LE) - scaled by 900 (rad/s)
+ *   [13]: Flags (reserved)
+ *   [14-15]: Padding (reserved)
  */
 function createSyncFramePacket(
   frameNumber: number,
@@ -67,7 +65,7 @@ function createSyncFramePacket(
   corruptCRC: boolean = false,
 ): DataView {
   const HEADER_SIZE = 10;
-  const SENSOR_DATA_SIZE = 24;
+  const SENSOR_DATA_SIZE = 16;
   const sensorCount = sensorIds.length;
 
   const TOTAL_SIZE = HEADER_SIZE + sensorCount * SENSOR_DATA_SIZE;
@@ -81,34 +79,29 @@ function createSyncFramePacket(
   view.setUint32(5, timestampUs, true); // Timestamp in microseconds
   view.setUint8(9, sensorCount); // Sensor Count
 
-  // -- SENSOR DATA (24 bytes each) --
+  // -- SENSOR DATA (16 bytes each) --
   for (let i = 0; i < sensorCount; i++) {
     const sensorOffset = HEADER_SIZE + i * SENSOR_DATA_SIZE;
 
     // [0] Sensor ID (1 byte)
     view.setUint8(sensorOffset, sensorIds[i]);
 
-    // [1-8] Quaternion (4x int16) - w,x,y,z - Identity quaternion
-    view.setInt16(sensorOffset + 1, QUAT_SCALE, true); // W = 1.0
-    view.setInt16(sensorOffset + 3, 0, true); // X = 0
-    view.setInt16(sensorOffset + 5, 0, true); // Y = 0
-    view.setInt16(sensorOffset + 7, 0, true); // Z = 0
+    // [1-6] Acceleration (3x int16) - scaled by 100
+    view.setInt16(sensorOffset + 1, 0, true); // Ax = 0
+    view.setInt16(sensorOffset + 3, 0, true); // Ay = 0
+    view.setInt16(sensorOffset + 5, ACCEL_SCALE, true); // Az = 1G (gravity)
 
-    // [9-14] Acceleration (3x int16) - scaled by 100
-    view.setInt16(sensorOffset + 9, 0, true); // Ax = 0
-    view.setInt16(sensorOffset + 11, 0, true); // Ay = 0
-    view.setInt16(sensorOffset + 13, ACCEL_SCALE, true); // Az = 1G (gravity)
+    // [7-12] Gyroscope (3x int16) - scaled by 900
+    view.setInt16(sensorOffset + 7, 0, true); // Gx = 0
+    view.setInt16(sensorOffset + 9, 0, true); // Gy = 0
+    view.setInt16(sensorOffset + 11, 0, true); // Gz = 0
 
-    // [15-20] Gyroscope (3x int16) - scaled by 900
-    view.setInt16(sensorOffset + 15, 0, true); // Gx = 0
-    view.setInt16(sensorOffset + 17, 0, true); // Gy = 0
-    view.setInt16(sensorOffset + 19, 0, true); // Gz = 0
+    // [13] Flags (bit0 = valid)
+    view.setUint8(sensorOffset + 13, 0x01);
 
-    // [21] Flags (bit0 = valid)
-    view.setUint8(sensorOffset + 21, 0x01);
-
-    // [22-23] Padding (reserved)
-    view.setUint16(sensorOffset + 22, 0, true);
+    // [14-15] Padding (reserved)
+    view.setUint8(sensorOffset + 14, 0);
+    view.setUint8(sensorOffset + 15, 0);
   }
 
   // Corrupt packet by changing the type to make it unrecognized

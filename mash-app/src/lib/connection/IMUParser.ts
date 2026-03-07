@@ -1,5 +1,5 @@
 /**
- * IMUParser - Static utility class for parsing BLE IMU packets
+ * IMUParser - Static utility class for parsing IMU packets
  *
  * Simplified parser for SyncFrame-based pipeline (0x25 absolute frames only).
  * Legacy per-node formats (0x23, 0x24) have been removed.
@@ -11,7 +11,7 @@ import type {
   NodeInfoPacket,
   JSONPacket,
   SyncQuality,
-} from "../ble/DeviceInterface";
+} from "../protocol/DeviceInterface";
 import {
   reportSyncedSamples,
   reportCRCResult,
@@ -103,29 +103,29 @@ const ENFORCE_TRUSTED_SYNC_IDS_FILTER = false;
 // ============================================================================
 // PIPELINE FIX: Drop-point counters — expose silent filter events
 // ============================================================================
-let _dropCountQuatMag = 0; // Quaternion magnitude out of [0.8, 1.2]
 let _dropCountInvalid = 0; // isValid flag was 0
 let _dropCountUntrusted = 0; // Filtered by _trustedSyncSensorIds
-let _dropCountCorruptFrame = 0; // Entire frame rejected (all quaternions garbage after recovery)
+let _dropCountCorruptFrame = 0; // Entire frame rejected (all accel values garbage after recovery)
+let _dropCountGhostIdentity = 0; // Implausible rawNodeId/localSensorIndex pair rejected
 let _totalSensorsProcessed = 0; // Total sensor slots seen (before filtering)
 
 /** Get pipeline drop counters for diagnostic display */
 export function getParserDropCounts() {
   return {
-    quatMag: _dropCountQuatMag,
     invalid: _dropCountInvalid,
     untrusted: _dropCountUntrusted,
     corruptFrame: _dropCountCorruptFrame,
+    ghostIdentity: _dropCountGhostIdentity,
     totalProcessed: _totalSensorsProcessed,
   };
 }
 
 /** Reset drop counters (call on disconnect/reconnect) */
 export function resetParserDropCounts() {
-  _dropCountQuatMag = 0;
   _dropCountInvalid = 0;
   _dropCountUntrusted = 0;
   _dropCountCorruptFrame = 0;
+  _dropCountGhostIdentity = 0;
   _totalSensorsProcessed = 0;
   _trustedSyncSensorIds.clear();
   _trustedSyncSensorIdsUpdatedAt = 0;
@@ -231,11 +231,11 @@ function trackSyncFrameDiag(
 }
 
 /**
- * Static parser class for BLE IMU packets.
+ * Static parser class for IMU packets.
  *
  * PROTOCOL SPECIFICATION:
- * - Gateway sends length-prefixed frames over BLE: [len_lo][len_hi][frame_data...]
- * - BLEConnection handles stream reassembly and extracts individual frames
+ * - Gateway sends length-prefixed frames over Serial: [len_lo][len_hi][frame_data...]
+ * - SerialConnection handles stream reassembly and extracts individual frames
  * - This parser processes individual frames (after length prefix is stripped)
  *
  * Frame Types (first byte):
@@ -335,16 +335,16 @@ export class IMUParser {
     //   [5-8]: Timestamp in microseconds (uint32 LE)
     //   [9]: Sensor count
     //
-    // Per-sensor data (24 bytes each):
+    // Per-sensor data (16 bytes each):
     //   [0]: Sensor ID
-    //   [1-8]: Quaternion (4x int16 LE) - w,x,y,z scaled by 16384
-    //   [9-14]: Accelerometer (3x int16 LE) - scaled by 100 (m/s²)
-    //   [15-20]: Gyroscope (3x int16 LE) - scaled by 900 (rad/s)
-    //   [21]: Flags (reserved)
-    //   [22-23]: Padding (reserved)
+    //   [1-6]: Accelerometer (3x int16 LE) - scaled by 100 (m/s²)
+    //   [7-12]: Gyroscope (3x int16 LE) - scaled by 900 (°/s)
+    //   [13]: Flags (reserved)
+    //   [14-15]: Reserved (rawNodeId, localSensorIndex)
+    // Quaternion removed: VQF fusion runs in webapp from accel+gyro.
     // =========================================================================
     const SYNC_FRAME_HEADER_SIZE = 10;
-    const SYNC_FRAME_SENSOR_SIZE = 24;
+    const SYNC_FRAME_SENSOR_SIZE = 16;
     const MAX_REASONABLE_SYNC_SENSORS = 32;
 
     if (len >= SYNC_FRAME_HEADER_SIZE && data.getUint8(0) === 0x25) {
@@ -380,8 +380,8 @@ export class IMUParser {
       // CRC-8 DETECTION & VALIDATION
       // =====================================================================
       // New firmware appends a CRC-8 byte after sensor data. Detect by:
-      //   payload % 24 === 1  → CRC present (N sensors × 24 + 1 CRC byte)
-      //   payload % 24 === 0  → No CRC (backwards compatible with old firmware)
+      //   payload % 16 === 1  → CRC present (N sensors × 16 + 1 CRC byte)
+      //   payload % 16 === 0  → No CRC (backwards compatible with old firmware)
       // =====================================================================
       let payloadBytes = rawPayloadBytes;
       let hasCRC = false;
@@ -477,29 +477,28 @@ export class IMUParser {
       const timestampSec = timestampUs / 1_000_000;
       const syncSensorIds: number[] = [];
 
-      // Pre-validate: on recovered frames, check quaternion magnitudes before accepting.
-      // Garbage data will have random int16 values that almost never produce |q| ≈ 1.0.
+      // Pre-validate: on recovered frames, check accel magnitudes before accepting.
+      // Garbage data will have random int16 values; real accel data should have
+      // a magnitude near 9.81 m/s² (gravity). Check |a| in [5, 25] m/s².
       if (wasRecovered) {
-        let validQuatCount = 0;
+        let validAccelCount = 0;
         for (let s = 0; s < sensorCount; s++) {
           const off = SYNC_FRAME_HEADER_SIZE + s * SYNC_FRAME_SENSOR_SIZE;
-          const rw = data.getInt16(off + 1, true);
-          const rx = data.getInt16(off + 3, true);
-          const ry = data.getInt16(off + 5, true);
-          const rz = data.getInt16(off + 7, true);
-          const magSq =
-            (rw * rw + rx * rx + ry * ry + rz * rz) / (16384.0 * 16384.0);
-          // Valid unit quaternion: magnitude² should be in [0.8, 1.2]
-          if (magSq >= 0.8 && magSq <= 1.2) validQuatCount++;
+          const axR = data.getInt16(off + 1, true) / 100.0;
+          const ayR = data.getInt16(off + 3, true) / 100.0;
+          const azR = data.getInt16(off + 5, true) / 100.0;
+          const magSq = axR * axR + ayR * ayR + azR * azR;
+          // Valid accel: magnitude² should be in [25, 625] (|a| in [5, 25] m/s²)
+          if (magSq >= 25 && magSq <= 625) validAccelCount++;
         }
-        if (validQuatCount === 0) {
-          // All quaternions are garbage — this is not real sensor data
+        if (validAccelCount === 0) {
+          // All accelerometers are garbage — this is not real sensor data
           _dropCountCorruptFrame++;
           reportParserRejects(1);
           if (nowMs - _lastHeaderCorruptionLog > 2000) {
             _lastHeaderCorruptionLog = nowMs;
             console.warn(
-              `[SYNC_FRAME] Rejected recovered frame: 0/${sensorCount} quaternions valid (garbage data)`,
+              `[SYNC_FRAME] Rejected recovered frame: 0/${sensorCount} accel values valid (garbage data)`,
             );
           }
           return packets;
@@ -513,51 +512,37 @@ export class IMUParser {
         const sensorId = data.getUint8(sensorOffset);
         _totalSensorsProcessed++;
 
-        // Quaternion (4x int16) - scaled by 16384
-        const qwRaw = data.getInt16(sensorOffset + 1, true);
-        const qxRaw = data.getInt16(sensorOffset + 3, true);
-        const qyRaw = data.getInt16(sensorOffset + 5, true);
-        const qzRaw = data.getInt16(sensorOffset + 7, true);
-
-        // Quaternion magnitude sanity check (catches corrupted sensor data)
-        const quatMagSq =
-          (qwRaw * qwRaw + qxRaw * qxRaw + qyRaw * qyRaw + qzRaw * qzRaw) /
-          (16384.0 * 16384.0);
-        if (quatMagSq < 0.8 || quatMagSq > 1.2) {
-          // Garbage quaternion — skip this sensor slot
-          _dropCountQuatMag++;
-          reportParserRejects(1);
-          continue;
-        }
-
-        const qw = qwRaw / 16384.0;
-        const qx = qxRaw / 16384.0;
-        const qy = qyRaw / 16384.0;
-        const qz = qzRaw / 16384.0;
-
         // Accelerometer (3x int16) - scaled by 100 (m/s²)
-        const ax = data.getInt16(sensorOffset + 9, true) / 100.0;
-        const ay = data.getInt16(sensorOffset + 11, true) / 100.0;
-        const az = data.getInt16(sensorOffset + 13, true) / 100.0;
+        const ax = data.getInt16(sensorOffset + 1, true) / 100.0;
+        const ay = data.getInt16(sensorOffset + 3, true) / 100.0;
+        const az = data.getInt16(sensorOffset + 5, true) / 100.0;
 
         // Gyroscope (3x int16) - scaled by 900 (rad/s)
-        const gxRaw = data.getInt16(sensorOffset + 15, true);
-        const gyRaw = data.getInt16(sensorOffset + 17, true);
-        const gzRaw = data.getInt16(sensorOffset + 19, true);
+        const gxRaw = data.getInt16(sensorOffset + 7, true);
+        const gyRaw = data.getInt16(sensorOffset + 9, true);
+        const gzRaw = data.getInt16(sensorOffset + 11, true);
 
-        // Flags (Offset 21 in 24-byte struct)
-        const flags = data.getUint8(sensorOffset + 21);
+        // Flags (Offset 13 in 16-byte struct)
+        const flags = data.getUint8(sensorOffset + 13);
         const isValid = (flags & 0x01) !== 0;
 
-        // S1-FIX: Physical identity from reserved bytes (Offsets 22-23)
+        // S1-FIX: Physical identity from reserved bytes (Offsets 14-15)
         // reserved[0] = rawNodeId (MAC-derived physical node ID, 0 = legacy FW)
         // reserved[1] = localSensorIndex (sensor's index within its node, 0-based)
-        const rawNodeId = data.getUint8(sensorOffset + 22);
-        const localSensorIndex = data.getUint8(sensorOffset + 23);
+        const rawNodeId = data.getUint8(sensorOffset + 14);
+        const localSensorIndex = data.getUint8(sensorOffset + 15);
 
         // Skip invalid sensors (Partial Frame Emission/Recovered Slots)
         if (!isValid) {
           _dropCountInvalid++;
+          reportParserRejects(1);
+          continue;
+        }
+
+        // Guard against corrupted reserved bytes creating ghost identities
+        // (e.g. node_43_s31 on hardware that only exposes a few sensors per node).
+        if (rawNodeId > 0 && localSensorIndex > 15) {
+          _dropCountGhostIdentity++;
           reportParserRejects(1);
           continue;
         }
@@ -593,7 +578,7 @@ export class IMUParser {
           timestamp: timestampSec,
           timestampUs,
           frameNumber,
-          quaternion: [qw, qx, qy, qz],
+          quaternion: [1, 0, 0, 0],
           accelerometer: [ax, ay, az],
           gyro: [gx, gy, gz],
           battery: 100,
@@ -682,10 +667,11 @@ export class IMUParser {
     let useMux: boolean | undefined;
     let sensorChannels: number[] | undefined;
 
-    if (len >= 46) {
+    if (len >= 42) {
       useMux = data.getUint8(37) === 1;
       sensorChannels = [];
-      for (let i = 0; i < 8; i++) {
+      // EC-1: Match firmware MAX_SENSORS (4), not legacy hardcoded 8
+      for (let i = 0; i < 4; i++) {
         sensorChannels.push(data.getInt8(38 + i));
       }
     }

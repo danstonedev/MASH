@@ -1,5 +1,7 @@
 # Gateway → Web App Data Pipeline: Detailed Engineering Analysis
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** References to "node delta" (0x26) should read "node data". Delta compression, 0x25/0x27 keyframe/delta split, and `decodeNodeDelta()` have been removed. Current packet types: `TDMA_PACKET_NODE_DATA` (0x26) keyframe-only → `SyncFramePacket` (0x25) output.
+
 **Date:** 2026-02-09  
 **Scope:** Data stream from Gateway firmware output through to web app state stores  
 **Assumption:** Node → Gateway path (ESP-NOW TDMA) is functioning correctly

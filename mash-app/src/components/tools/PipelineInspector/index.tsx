@@ -12,7 +12,7 @@
 
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { useDeviceRegistry } from "../../../store/useDeviceRegistry";
 import { Activity, X } from "lucide-react";
@@ -20,6 +20,7 @@ import clsx from "clsx";
 
 import { DeviceVisualizer } from "./Visualizer";
 import { DataMonitor } from "./DataMonitor";
+import { MultiDriftMonitor } from "./MultiDriftMonitor";
 import {
   SegmentSelector,
   FrameOptionsPanel,
@@ -41,6 +42,9 @@ export function PipelineInspector({ isOpen, onClose }: PipelineInspectorProps) {
     (d) => d.isConnected,
   );
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+
+  // Right-panel tab
+  const [rightTab, setRightTab] = useState<"live" | "drift">("live");
 
   // View state options
   const [viewOptions, setViewOptions] = useState({
@@ -67,6 +71,34 @@ export function PipelineInspector({ isOpen, onClose }: PipelineInspectorProps) {
             <Activity className="text-accent" />
             Pipeline Inspector
           </h2>
+
+          <div className="w-px h-6 mx-2 bg-white/10" />
+
+          {/* Live / Drift tab switcher */}
+          <div className="flex rounded overflow-hidden border border-white/10">
+            <button
+              onClick={() => setRightTab("live")}
+              className={clsx(
+                "px-3 py-1 text-xs font-bold uppercase tracking-wider transition-colors",
+                rightTab === "live"
+                  ? "bg-accent text-white"
+                  : "text-white/40 hover:text-white/70 hover:bg-white/5",
+              )}
+            >
+              Live
+            </button>
+            <button
+              onClick={() => setRightTab("drift")}
+              className={clsx(
+                "px-3 py-1 text-xs font-bold uppercase tracking-wider transition-colors",
+                rightTab === "drift"
+                  ? "bg-purple-500/30 text-purple-300"
+                  : "text-white/40 hover:text-white/70 hover:bg-white/5",
+              )}
+            >
+              Drift
+            </button>
+          </div>
 
           <div className="w-px h-6 mx-2 bg-white/10" />
 
@@ -121,6 +153,19 @@ export function PipelineInspector({ isOpen, onClose }: PipelineInspectorProps) {
 
       {/* Main Content */}
       <div className="flex-1 relative bg-[#0a0a0a] overflow-hidden flex">
+        {/* DRIFT TAB — full-width multi-sensor view */}
+        {rightTab === "drift" && (
+          <MultiDriftMonitor
+            deviceIds={connectedDevices.map((d) => d.id)}
+            deviceNames={
+              new Map(connectedDevices.map((d) => [d.id, d.name || d.id]))
+            }
+          />
+        )}
+
+        {/* LIVE TAB — canvas + right panel */}
+        {rightTab === "live" && (
+          <>
         {/* LEFT CANVAS AREA */}
         <div className="relative flex-1 h-full">
           {effectiveDeviceId ? (
@@ -154,21 +199,25 @@ export function PipelineInspector({ isOpen, onClose }: PipelineInspectorProps) {
 
         {/* RIGHT CONTROL PANEL */}
         {effectiveDeviceId && (
-          <div className="w-[400px] border-l border-white/10 bg-[#111] overflow-y-auto p-4 custom-scrollbar">
-            <DataMonitor deviceId={effectiveDeviceId} />
+          <div className="w-[400px] border-l border-white/10 bg-[#111] flex flex-col">
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+              <DataMonitor deviceId={effectiveDeviceId} />
 
-            {/* 2. BODY ASSIGNMENT */}
-            <SegmentSelector deviceId={effectiveDeviceId} />
+                  {/* BODY ASSIGNMENT */}
+                  <SegmentSelector deviceId={effectiveDeviceId} />
 
-            {/* 3. VIEW OPTIONS */}
-            <FrameOptionsPanel
-              options={viewOptions}
-              setOptions={setViewOptions}
-            />
+                  {/* VIEW OPTIONS */}
+                  <FrameOptionsPanel
+                    options={viewOptions}
+                    setOptions={setViewOptions}
+                  />
 
-            {/* 4. FILTER TUNING (EKF + ZUPT) */}
-            <FilterConfigPanel />
+                  {/* FILTER TUNING (EKF + ZUPT) */}
+                  <FilterConfigPanel />
+            </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>,

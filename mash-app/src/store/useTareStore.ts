@@ -443,6 +443,7 @@ export const useTareStore = create<TareStoreState>()(
     {
       name: "tare-storage",
       version: 1,
+      migrate: (persistedState: unknown) => persistedState as any,
       storage: createJSONStorage(() => localStorage),
 
       // Custom serialization: Store as { serialized: SerializedTareState[] }

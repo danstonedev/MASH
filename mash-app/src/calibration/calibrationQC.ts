@@ -238,7 +238,7 @@ export function buildCalibrationQcArtifact(
         const warnings: string[] = [];
         if (interpolationRatio > 0.35) {
           warnings.push(
-            `Sensor timing drift was high (${(interpolationRatio * 100).toFixed(1)}% repaired samples). Try this now: keep sensors within range, reduce USB/Bluetooth load, and run calibration again.`,
+            `Sensor timing drift was high (${(interpolationRatio * 100).toFixed(1)}% repaired samples). Try this now: keep sensors within range, reduce USB load, and run calibration again.`,
           );
         }
         if (input.timelineDiagnostics.maxSkewMs > 15) {

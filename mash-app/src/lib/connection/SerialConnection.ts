@@ -9,6 +9,7 @@ import { reportSerialLoss } from "./SyncedSampleStats";
 import { useOptionalSensorsStore } from "../../store/useOptionalSensorsStore";
 import { useNetworkStore } from "../../store/useNetworkStore";
 import { makeDeviceKey } from "../deviceKey";
+import type { IMUDataPacket, JSONPacket } from "../protocol/DeviceInterface";
 
 // Espressif VID — the USB Serial/JTAG hardware controller (ARDUINO_USB_MODE=1)
 // always uses Espressif's VID regardless of the board manufacturer.
@@ -31,6 +32,80 @@ const PARSE_TIME_BUDGET_MS = 10;
 const PARSE_MAX_FRAMES_PER_TICK = 256;
 const MAX_PENDING_PARSE_FRAMES = 4096;
 const PENDING_PARSE_COMPACT_THRESHOLD = 1024;
+
+interface SyncContractSnapshot {
+  authoritativeExpectedCount: number;
+  activeStreamingCount: number;
+}
+
+function isJsonPacketWithType(
+  packet: unknown,
+): packet is JSONPacket & { type: string } {
+  return (
+    !!packet &&
+    typeof packet === "object" &&
+    "type" in packet &&
+    typeof (packet as { type?: unknown }).type === "string"
+  );
+}
+
+function getSyncContractSnapshot(packet: unknown): SyncContractSnapshot | null {
+  if (!isJsonPacketWithType(packet) || packet.type !== "sync_status") {
+    return null;
+  }
+
+  const syncBuffer = (
+    packet as JSONPacket & {
+      syncBuffer?: Record<string, unknown>;
+    }
+  ).syncBuffer;
+
+  const authoritativeExpectedCount = Number(
+    syncBuffer?.authoritativeExpectedSensors ??
+      syncBuffer?.expectedSensors ??
+      0,
+  );
+  const activeStreamingCount = Number(
+    syncBuffer?.activeStreamingSensors ?? syncBuffer?.expectedSensors ?? 0,
+  );
+
+  return {
+    authoritativeExpectedCount: Number.isFinite(authoritativeExpectedCount)
+      ? authoritativeExpectedCount
+      : 0,
+    activeStreamingCount: Number.isFinite(activeStreamingCount)
+      ? activeStreamingCount
+      : 0,
+  };
+}
+
+function isPlausibleFrame(packetType: number, frameLen: number): boolean {
+  // 0x25 sync frame: header(10) + N*16 sensor slots [+ optional CRC byte]
+  if (packetType === 0x25) {
+    const minLen = 10 + 16; // one sensor
+    const maxLen = 10 + 32 * 16 + 1; // bounded by parser's max reasonable sensors
+    if (frameLen < minLen || frameLen > maxLen) return false;
+    const payload = frameLen - 10;
+    return payload % 16 === 0 || payload % 16 === 1;
+  }
+
+  // 0x05 node info: legacy 37 bytes or extended 46 bytes
+  if (packetType === 0x05) {
+    return frameLen === 37 || frameLen === 46;
+  }
+
+  // 0x04 environmental packet is fixed-size
+  if (packetType === 0x04) {
+    return frameLen === 31;
+  }
+
+  // 0x06 JSON packet is variable length, but must include at least type+1 byte
+  if (packetType === 0x06) {
+    return frameLen >= 2 && frameLen <= 4096;
+  }
+
+  return false;
+}
 
 export class SerialConnection implements IConnection {
   type: "serial" = "serial";
@@ -59,6 +134,7 @@ export class SerialConnection implements IConnection {
 
   private _onData: ((data: ConnectionData) => void) | null = null;
   private _onStatus: ((status: ConnectionStatus) => void) | null = null;
+  private lastSyncContract: SyncContractSnapshot | null = null;
 
   private writeMutex = Promise.resolve();
   private debugStats = {
@@ -216,7 +292,26 @@ export class SerialConnection implements IConnection {
       console.error("Serial Connection Error:", error);
       this.setStatus("error");
       await this.disconnect();
-      throw error instanceof Error ? error : new Error(String(error));
+
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      const errName =
+        typeof error === "object" && error !== null && "name" in error
+          ? String((error as any).name)
+          : "";
+
+      const isPortBusyOrDenied =
+        errName === "NetworkError" ||
+        /Failed to open serial port|Access is denied|resource busy|Permission denied/i.test(
+          rawMessage,
+        );
+
+      if (isPortBusyOrDenied) {
+        throw new Error(
+          "Unable to open serial port. It is likely already in use by another app or tab (Arduino IDE Serial Monitor, another browser tab, or VS Code serial extension). Close anything using the COM port, unplug/replug the device, and try again.",
+        );
+      }
+
+      throw error instanceof Error ? error : new Error(rawMessage);
     }
   }
 
@@ -264,7 +359,11 @@ export class SerialConnection implements IConnection {
 
     if (this.port) {
       try {
-        await this.port.close();
+        // Calling close() on an unopened/already-closed port throws in some
+        // browsers. Only close when streams indicate an open handle.
+        if (this.port.readable || this.port.writable) {
+          await this.port.close();
+        }
       } catch (e) {
         console.warn("Serial port close error:", e);
       }
@@ -409,14 +508,11 @@ export class SerialConnection implements IConnection {
 
       if (this.ringBuffer.length < 2 + frameLen) break; // incomplete frame
 
-      // Validate packet type before extracting (peek at byte after length prefix)
+      // Validate packet type + frame structure before extracting.
+      // This rejects ASCII/debug interleave that can accidentally look like
+      // a length-prefixed frame with a known type byte.
       const packetType = this.ringBuffer.peekByte(2);
-      if (
-        packetType !== 0x04 &&
-        packetType !== 0x05 &&
-        packetType !== 0x06 &&
-        packetType !== 0x25
-      ) {
+      if (!isPlausibleFrame(packetType, frameLen)) {
         // Unknown type is usually serial log/noise while discovering framing;
         // advance one byte to re-sync on the next possible length prefix.
         resyncAttempts++;
@@ -597,7 +693,17 @@ export class SerialConnection implements IConnection {
       };
 
       this.worker.onerror = (err) => {
-        console.error("Serial worker error:", err);
+        console.warn(
+          "[SerialConnection] Worker parsing failed; falling back to main-thread parser.",
+        );
+        this.worker?.terminate();
+        this.worker = null;
+      };
+
+      this.worker.onmessageerror = () => {
+        console.warn(
+          "[SerialConnection] Worker message decode failed; falling back to main-thread parser.",
+        );
         this.worker?.terminate();
         this.worker = null;
       };
@@ -751,16 +857,20 @@ export class SerialConnection implements IConnection {
             `[SerialConnection] Gateway ingest (${windowMs}ms): ${nodeParts.join(" | ") || "no-node-data"}`,
           );
         }
+        const syncContract = getSyncContractSnapshot(packet);
+        if (syncContract) {
+          this.lastSyncContract = syncContract;
+        }
         window.dispatchEvent(
-          new CustomEvent("ble-json-packet", { detail: packet }),
+          new CustomEvent("json-packet", { detail: packet }),
         );
-        this._onData?.(packet as any);
+        this._onData?.(packet as ConnectionData);
         continue;
       }
 
       if ("nodeName" in packet) {
         const enhancedInfo = { ...packet, gatewayName: deviceName };
-        this._onData?.(enhancedInfo as any);
+        this._onData?.(enhancedInfo as ConnectionData);
         continue;
       }
 
@@ -768,17 +878,33 @@ export class SerialConnection implements IConnection {
     }
 
     if (imuPackets.length > 0) {
-      const prefixedPackets = imuPackets.map((p) => ({
-        ...p,
-        // PHASE-1: Use physical identity key when firmware provides rawNodeId,
-        // fall back to compact-ID key for legacy firmware (rawNodeId=0/undefined).
-        deviceId: makeDeviceKey(
-          p.rawNodeId,
-          p.localSensorIndex,
-          p.sensorId ?? 0,
-        ),
-        sourceGateway: deviceName,
-      }));
+      const prefixedPackets = imuPackets.map((p) => {
+        const imuPacket = p as IMUDataPacket;
+        const frameCompleteness = imuPacket.frameCompleteness
+          ? {
+              ...imuPacket.frameCompleteness,
+              authoritativeExpectedCount:
+                imuPacket.frameCompleteness.authoritativeExpectedCount ??
+                this.lastSyncContract?.authoritativeExpectedCount,
+              activeStreamingCount:
+                imuPacket.frameCompleteness.activeStreamingCount ??
+                this.lastSyncContract?.activeStreamingCount,
+            }
+          : undefined;
+
+        return {
+          ...imuPacket,
+          frameCompleteness,
+          // PHASE-1: Use physical identity key when firmware provides rawNodeId,
+          // fall back to compact-ID key for legacy firmware (rawNodeId=0/undefined).
+          deviceId: makeDeviceKey(
+            imuPacket.rawNodeId,
+            imuPacket.localSensorIndex,
+            imuPacket.sensorId ?? 0,
+          ),
+          sourceGateway: deviceName,
+        };
+      });
       this._onData?.(prefixedPackets);
     }
   }
@@ -807,7 +933,7 @@ export class SerialConnection implements IConnection {
     }
   }
 
-  async sendCommand(cmd: string, params?: any) {
+  async sendCommand(cmd: string, params?: unknown) {
     if (!this.writer) return;
 
     const payload = params ? { cmd, ...params } : { cmd };

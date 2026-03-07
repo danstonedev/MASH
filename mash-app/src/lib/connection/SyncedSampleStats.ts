@@ -66,10 +66,6 @@ interface SampleStats {
   partialHz: number;
 
   lastUpdate: number;
-  // V3 Delta Stats (Phase 3)
-  v3KeyframeCount: number;
-  v3DeltaCount: number;
-  v3PacketCount: number;
   // Per-sensor Hz tracking (200Hz verification)
   perSensorStats: Map<number, PerSensorStats>;
 }
@@ -89,9 +85,6 @@ const stats: SampleStats = {
   partialFrameCount: 0,
   partialHz: 0,
   lastUpdate: 0,
-  v3KeyframeCount: 0,
-  v3DeltaCount: 0,
-  v3PacketCount: 0,
   perSensorStats: new Map(),
 };
 
@@ -156,7 +149,7 @@ interface PipelineLossStats {
   serialResyncEvents: number;
   /** Frames rejected by CRC check */
   crcRejectCount: number;
-  /** Sensors rejected by parser (quatMag + invalid + untrusted + corruptFrame) */
+  /** Sensors rejected by parser (invalid + untrusted + corruptFrame) */
   parserRejectCount: number;
   /** Total successfully delivered frames */
   deliveredFrames: number;
@@ -304,10 +297,10 @@ export function reportSyncedSamples(
   }
 
   // Calculate instantaneous Hz from packet timing (for EMA smoothing)
-  // BUT: filter out unrealistic spikes from bursty BLE notifications
+  // BUT: filter out unrealistic spikes from bursty serial notifications
   if (lastPacketTime > 0) {
     const deltaMs = now - lastPacketTime;
-    // Only update Hz if deltaMs is realistic (> 1ms to filter BLE burst processing)
+    // Only update Hz if deltaMs is realistic (> 1ms to filter serial burst processing)
     // At 200Hz, typical inter-packet time is 5ms - allow down to 1ms for jitter
     if (deltaMs > 1 && deltaMs < 500) {
       // Instant Hz = samples in this packet / time since last packet
@@ -363,7 +356,7 @@ export function reportSyncedSamples(
 
   // Track per-sensor Hz using FIRMWARE TIMESTAMPS (ground truth).
   // The firmware clock runs at exactly 200Hz (5000µs intervals) and is
-  // immune to USB serial buffering, JS event loop jitter, and BLE burst
+  // immune to USB serial buffering, JS event loop jitter, and burst
   // delivery that made the old JS-timing approach undercount.
   const fwTs = timestamps && timestamps.length > 0 ? timestamps[0] : undefined;
 
@@ -603,19 +596,7 @@ export function getSampleStats(): {
   lastSampleCountInPacket: number;
   incompletePackets: number;
   expectedSensorCount: number;
-  v3KeyframeCount: number;
-  v3DeltaCount: number;
-  v3PacketCount: number;
-  v3CompressionRatio: number;
 } {
-  // Calculate compression ratio: (keyframes + deltas) / total if all were keyframes
-  const totalV3Samples = stats.v3KeyframeCount + stats.v3DeltaCount;
-  const v3CompressionRatio =
-    totalV3Samples > 0
-      ? (stats.v3KeyframeCount * 25 + stats.v3DeltaCount * 16) /
-        (totalV3Samples * 25)
-      : 1.0;
-
   return {
     sampleHz: stats.sampleHz,
     packetHz: stats.packetHz,
@@ -623,27 +604,7 @@ export function getSampleStats(): {
     lastSampleCountInPacket: stats.lastSampleCountInPacket,
     incompletePackets: stats.incompletePackets,
     expectedSensorCount: stats.expectedSensorIds.size,
-    v3KeyframeCount: stats.v3KeyframeCount,
-    v3DeltaCount: stats.v3DeltaCount,
-    v3PacketCount: stats.v3PacketCount,
-    v3CompressionRatio,
   };
-}
-
-/**
- * Report V3 delta packet statistics.
- * Called from IMUParser when processing 0x24 V3 packets.
- *
- * @param keyframeCount - Number of keyframe (absolute) samples in this packet
- * @param deltaCount - Number of delta-compressed samples in this packet
- */
-export function reportV3Packet(
-  keyframeCount: number,
-  deltaCount: number,
-): void {
-  stats.v3PacketCount++;
-  stats.v3KeyframeCount += keyframeCount;
-  stats.v3DeltaCount += deltaCount;
 }
 
 /**
@@ -770,9 +731,6 @@ export function resetSyncedStats(): void {
   stats.expectedSensorIds.clear();
   stats.lastSensorDetection = 0;
   stats.lastUpdate = 0;
-  stats.v3KeyframeCount = 0;
-  stats.v3DeltaCount = 0;
-  stats.v3PacketCount = 0;
   stats.perSensorStats.clear();
   // Reset EMA and baseline state
   lastPacketTime = 0;

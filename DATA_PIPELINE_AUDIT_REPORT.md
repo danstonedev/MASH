@@ -1,4 +1,7 @@
 # Data Pipeline Audit Report — Complete Technical Specification
+
+> **⚠️ PARTIALLY OUTDATED (March 2026):** "Upgrade 3: Delta Compression" was never implemented and has been removed. BLE mode references are also outdated — system uses ESP-NOW only. See `TDMAProtocol.h` for current protocol definitions.
+
 **Date:** February 3, 2026 (Updated)  
 **Original Date:** February 2, 2026  
 **Auditor:** GitHub Copilot (System Architect)  

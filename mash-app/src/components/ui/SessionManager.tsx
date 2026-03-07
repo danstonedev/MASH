@@ -82,7 +82,7 @@ export function SessionManager() {
 
     try {
       setIsLoading(true);
-      const text = await file.text();
+      const text = await readImportFile(file);
       const { session, imuFrames, environmentalFrames } =
         parseSessionImportPayload(JSON.parse(text));
 
@@ -342,7 +342,7 @@ export function SessionManager() {
         type="file"
         ref={fileInputRef}
         onChange={handleImportFile}
-        accept=".json"
+        accept=".json,.gz,.json.gz"
         aria-label="Import session JSON file"
         className="hidden"
       />
@@ -410,6 +410,20 @@ export function SessionManager() {
   );
 }
 
+async function readImportFile(file: File): Promise<string> {
+  const isGzip =
+    file.name.toLowerCase().endsWith(".gz") || file.type === "application/gzip";
+
+  if (!isGzip || typeof DecompressionStream === "undefined") {
+    return await file.text();
+  }
+
+  const decompressedStream = file
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(decompressedStream).text();
+}
+
 // ============================================================================
 // HELPER COMPONENTS
 // ============================================================================
@@ -473,8 +487,10 @@ function ExportButton({
       >
         <Download className="w-3.5 h-3.5" />
         {isExporting
-          ? `${format.toUpperCase()} ${Math.round(exportProgress)}%`
-          : format.toUpperCase()}
+          ? `${format === "json" ? "JSON.gz" : format.toUpperCase()} ${Math.round(exportProgress)}%`
+          : format === "json"
+            ? "JSON.gz"
+            : format.toUpperCase()}
       </button>
 
       {isExporting && (

@@ -28,10 +28,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 const SYNC_FRAME_PACKET_TYPE = 0x25;
 const SYNC_FRAME_HEADER_SIZE = 10; // type(1) + frame(4) + timestamp(4) + sensorCount(1)
-const SYNC_FRAME_SENSOR_SIZE = 24; // sensorId(1) + q[4](8) + a[3](6) + g[3](6) + flags(1) + reserved(2)
+const SYNC_FRAME_SENSOR_SIZE = 16; // sensorId(1) + a[3](6) + g[3](6) + flags(1) + reserved(2)
 
 // Scaling factors (must match firmware)
-const QUAT_SCALE = 16384; // Quaternion: ±1.0 → ±16384
 const ACCEL_SCALE = 100; // Accelerometer: m/s² × 100
 const GYRO_SCALE = 900; // Gyroscope: °/s × 900
 
@@ -41,7 +40,6 @@ const GYRO_SCALE = 900; // Gyroscope: °/s × 900
 
 interface SensorData {
   sensorId: number;
-  quaternion: { w: number; x: number; y: number; z: number };
   acceleration: { x: number; y: number; z: number };
   gyroscope: { x: number; y: number; z: number };
 }
@@ -55,7 +53,6 @@ interface SyncFrame {
 interface ParsedPacket {
   sensorId: number;
   timestamp: number;
-  quaternion: { w: number; x: number; y: number; z: number };
   acceleration: { x: number; y: number; z: number };
   gyroscope: { x: number; y: number; z: number };
   format: string;
@@ -88,26 +85,20 @@ function buildSyncFramePacket(frame: SyncFrame): Uint8Array {
 
     view.setUint8(offset, sensor.sensorId);
 
-    // Quaternion (scaled by 16384 - matches firmware)
-    view.setInt16(offset + 1, Math.round(sensor.quaternion.w * 16384), true);
-    view.setInt16(offset + 3, Math.round(sensor.quaternion.x * 16384), true);
-    view.setInt16(offset + 5, Math.round(sensor.quaternion.y * 16384), true);
-    view.setInt16(offset + 7, Math.round(sensor.quaternion.z * 16384), true);
-
     // Accelerometer (scaled by 100 for m/s² - matches firmware)
-    view.setInt16(offset + 9, Math.round(sensor.acceleration.x * 100), true);
-    view.setInt16(offset + 11, Math.round(sensor.acceleration.y * 100), true);
-    view.setInt16(offset + 13, Math.round(sensor.acceleration.z * 100), true);
+    view.setInt16(offset + 1, Math.round(sensor.acceleration.x * 100), true);
+    view.setInt16(offset + 3, Math.round(sensor.acceleration.y * 100), true);
+    view.setInt16(offset + 5, Math.round(sensor.acceleration.z * 100), true);
 
     // Gyroscope (scaled by 900 for rad/s - matches firmware)
-    view.setInt16(offset + 15, Math.round(sensor.gyroscope.x * 900), true);
-    view.setInt16(offset + 17, Math.round(sensor.gyroscope.y * 900), true);
-    view.setInt16(offset + 19, Math.round(sensor.gyroscope.z * 900), true);
+    view.setInt16(offset + 7, Math.round(sensor.gyroscope.x * 900), true);
+    view.setInt16(offset + 9, Math.round(sensor.gyroscope.y * 900), true);
+    view.setInt16(offset + 11, Math.round(sensor.gyroscope.z * 900), true);
 
     // Flags and reserved
-    view.setUint8(offset + 21, 0x01); // Valid flag
-    view.setUint8(offset + 22, 0);
-    view.setUint8(offset + 23, 0);
+    view.setUint8(offset + 13, 0x01); // Valid flag
+    view.setUint8(offset + 14, 0);
+    view.setUint8(offset + 15, 0);
   }
 
   return bytes;
@@ -150,26 +141,19 @@ function parseSyncFramePacket(data: Uint8Array): ParsedPacket[] {
 
     const sensorId = view.getUint8(offset);
 
-    // Quaternion (scaled by 16384 - matches firmware)
-    const qw = view.getInt16(offset + 1, true) / 16384.0;
-    const qx = view.getInt16(offset + 3, true) / 16384.0;
-    const qy = view.getInt16(offset + 5, true) / 16384.0;
-    const qz = view.getInt16(offset + 7, true) / 16384.0;
-
     // Accelerometer (scaled by 100 - matches firmware)
-    const ax = view.getInt16(offset + 9, true) / 100.0;
-    const ay = view.getInt16(offset + 11, true) / 100.0;
-    const az = view.getInt16(offset + 13, true) / 100.0;
+    const ax = view.getInt16(offset + 1, true) / 100.0;
+    const ay = view.getInt16(offset + 3, true) / 100.0;
+    const az = view.getInt16(offset + 5, true) / 100.0;
 
     // Gyroscope (scaled by 900 - matches firmware)
-    const gx = view.getInt16(offset + 15, true) / 900.0;
-    const gy = view.getInt16(offset + 17, true) / 900.0;
-    const gz = view.getInt16(offset + 19, true) / 900.0;
+    const gx = view.getInt16(offset + 7, true) / 900.0;
+    const gy = view.getInt16(offset + 9, true) / 900.0;
+    const gz = view.getInt16(offset + 11, true) / 900.0;
 
     packets.push({
       sensorId,
       timestamp: timestampSec,
-      quaternion: { w: qw, x: qx, y: qy, z: qz },
       acceleration: { x: ax, y: ay, z: az },
       gyroscope: { x: gx, y: gy, z: gz },
       format: "0x25-sync",
@@ -187,7 +171,6 @@ interface SampleInput {
   sensorId: number;
   timestampUs: number;
   frameNumber: number;
-  quaternion: { w: number; x: number; y: number; z: number };
   acceleration: { x: number; y: number; z: number };
   gyroscope: { x: number; y: number; z: number };
 }
@@ -256,7 +239,6 @@ class SyncFrameBufferSimulator {
       const sample = slot.sensors.get(id)!;
       return {
         sensorId: sample.sensorId,
-        quaternion: sample.quaternion,
         acceleration: sample.acceleration,
         gyroscope: sample.gyroscope,
       };
@@ -305,7 +287,6 @@ class SyncFrameBufferSimulator {
 function createSensorData(sensorId: number, variation: number = 0): SensorData {
   return {
     sensorId,
-    quaternion: { w: 1, x: 0 + variation * 0.001, y: 0, z: 0 },
     acceleration: { x: 0, y: 0, z: 9.81 + variation * 0.01 },
     gyroscope: { x: variation * 0.1, y: 0, z: 0 },
   };
@@ -320,7 +301,6 @@ function createSampleInput(
     sensorId,
     timestampUs,
     frameNumber,
-    quaternion: { w: 1, x: 0, y: 0, z: 0 },
     acceleration: { x: 0, y: 0, z: 9.81 },
     gyroscope: { x: 0, y: 0, z: 0 },
   };
@@ -355,7 +335,6 @@ describe("Sync Frame Pipeline", () => {
         sensors: [
           {
             sensorId: 180,
-            quaternion: { w: 1, x: 0, y: 0, z: 0 },
             acceleration: { x: 0, y: 0, z: 1 }, // 1 m/s²
             gyroscope: { x: 0, y: 0, z: 1.5 }, // 1.5 rad/s (~86 deg/s)
           },
@@ -371,14 +350,11 @@ describe("Sync Frame Pipeline", () => {
       // Check sensor ID
       expect(view.getUint8(sensorOffset)).toBe(180);
 
-      // Check quaternion (w=1 → 16384)
-      expect(view.getInt16(sensorOffset + 1, true)).toBe(16384);
+      // Check accel z (1 m/s² → 100 at scale 100) at offset +5
+      expect(view.getInt16(sensorOffset + 5, true)).toBe(100);
 
-      // Check accel z (1 m/s² → 100 at scale 100) at offset +13
-      expect(view.getInt16(sensorOffset + 13, true)).toBe(100);
-
-      // Check gyro z (1.5 rad/s → 1350 at scale 900) at offset +19
-      expect(view.getInt16(sensorOffset + 19, true)).toBe(1350);
+      // Check gyro z (1.5 rad/s → 1350 at scale 900) at offset +11
+      expect(view.getInt16(sensorOffset + 11, true)).toBe(1350);
     });
 
     it("should calculate correct packet size for 7 sensors", () => {
@@ -395,7 +371,7 @@ describe("Sync Frame Pipeline", () => {
       const expectedSize = SYNC_FRAME_HEADER_SIZE + 7 * SYNC_FRAME_SENSOR_SIZE;
 
       expect(packet.length).toBe(expectedSize);
-      expect(packet.length).toBe(10 + 7 * 24); // 178 bytes
+      expect(packet.length).toBe(10 + 7 * 16); // 122 bytes
     });
   });
 
@@ -420,7 +396,6 @@ describe("Sync Frame Pipeline", () => {
       const sensorIds = [180, 181, 182, 183, 184, 185, 204];
       const sensors = sensorIds.map((id, i) => ({
         sensorId: id,
-        quaternion: { w: 1, x: 0.1 * i, y: 0, z: 0 },
         acceleration: { x: 0, y: 0, z: 9.81 + i * 0.1 },
         gyroscope: { x: i * 10, y: 0, z: 0 },
       }));
@@ -443,10 +418,6 @@ describe("Sync Frame Pipeline", () => {
 
       // Verify sensor IDs are preserved
       expect(parsed.map((p) => p.sensorId)).toEqual(sensorIds);
-
-      // Spot check data (allowing for quantization)
-      expect(parsed[0].quaternion.w).toBeCloseTo(1, 2);
-      expect(parsed[3].quaternion.x).toBeCloseTo(0.3, 1);
     });
 
     it("should throw on truncated packet", () => {
@@ -603,7 +574,6 @@ describe("Sync Frame Pipeline", () => {
           sensorId,
           timestampUs,
           frameNumber: 1,
-          quaternion: { w: 0.9, x: 0.1 * i, y: 0.05 * i, z: 0.02 * i },
           acceleration: { x: 0.1 * i, y: 0.2 * i, z: 9.81 },
           gyroscope: { x: 1.0 * i, y: 0.5 * i, z: 0.2 * i }, // Realistic rad/s values
         };
@@ -625,8 +595,6 @@ describe("Sync Frame Pipeline", () => {
       for (const p of parsed) {
         const original = originalData.get(p.sensorId)!;
 
-        expect(p.quaternion.w).toBeCloseTo(original.quaternion.w, 1);
-        expect(p.quaternion.x).toBeCloseTo(original.quaternion.x, 1);
         expect(p.acceleration.z).toBeCloseTo(original.acceleration.z, 0);
         expect(p.gyroscope.x).toBeCloseTo(original.gyroscope.x, 0);
       }

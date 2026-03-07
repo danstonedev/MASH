@@ -44,12 +44,16 @@ export interface SyncNodeInfo {
 export interface SyncBufferMetrics {
   initialized: boolean;
   expectedSensors: number;
+  authoritativeExpectedSensors: number;
+  activeStreamingSensors: number;
   completedFrames: number;
   trulyComplete: number;
   partialRecovery: number;
   dropped: number;
   incomplete: number;
   trueSyncRate: number;
+  strictTrueSyncRate: number;
+  transportSyncRate: number;
 }
 
 export interface SyncReadinessState {
@@ -68,6 +72,7 @@ export interface SyncReadinessState {
     bufferReady: boolean;
     syncQualityOk: boolean;
     syncRate: number;
+    strictSyncRate: number;
   };
   elapsedMs: number;
   pollCount: number;
@@ -83,7 +88,7 @@ export type SyncReadinessListener = (state: SyncReadinessState) => void;
 const POLL_INTERVAL_MS = 500;
 
 /** Maximum time to wait for readiness before declaring timeout (ms) */
-const READINESS_TIMEOUT_MS = 15000;
+const READINESS_TIMEOUT_MS = 45000;
 
 /** Minimum number of ready polls before confirming (prevents flicker) */
 const READY_CONFIRM_COUNT = 2;
@@ -101,7 +106,40 @@ const FALLBACK_MIN_POLLS = 4;
  * Smart retry: if TDMA is RUNNING with alive nodes but no completed frames
  * after this duration, trigger a deferred sync reset to unstick the pipeline.
  */
-const SMART_RETRY_MS = 8000;
+const SMART_RETRY_MS = 20000;
+
+export function deriveSyncBufferMetrics(
+  data: Record<string, any>,
+): SyncBufferMetrics {
+  const completedFrames = data.syncBuffer?.completedFrames ?? 0;
+  const incomplete = data.syncBuffer?.incomplete ?? 0;
+  const strictTrueSyncRate = data.syncBuffer?.trueSyncRate ?? 0;
+  const transportSyncRate =
+    completedFrames + incomplete > 0
+      ? (completedFrames / (completedFrames + incomplete)) * 100
+      : strictTrueSyncRate;
+
+  return {
+    initialized: data.syncBuffer?.initialized ?? false,
+    expectedSensors: data.syncBuffer?.expectedSensors ?? 0,
+    authoritativeExpectedSensors:
+      data.syncBuffer?.authoritativeExpectedSensors ??
+      data.syncBuffer?.expectedSensors ??
+      0,
+    activeStreamingSensors:
+      data.syncBuffer?.activeStreamingSensors ??
+      data.syncBuffer?.expectedSensors ??
+      0,
+    completedFrames,
+    trulyComplete: data.syncBuffer?.trulyComplete ?? 0,
+    partialRecovery: data.syncBuffer?.partialRecovery ?? 0,
+    dropped: data.syncBuffer?.dropped ?? 0,
+    incomplete,
+    trueSyncRate: strictTrueSyncRate,
+    strictTrueSyncRate,
+    transportSyncRate,
+  };
+}
 
 // ============================================================================
 // SyncReadiness Class
@@ -343,31 +381,26 @@ export class SyncReadiness {
       compactBase: n.compactBase ?? undefined,
     }));
 
-    const syncBuffer: SyncBufferMetrics = {
-      initialized: data.syncBuffer?.initialized ?? false,
-      expectedSensors: data.syncBuffer?.expectedSensors ?? 0,
-      completedFrames: data.syncBuffer?.completedFrames ?? 0,
-      trulyComplete: data.syncBuffer?.trulyComplete ?? 0,
-      partialRecovery: data.syncBuffer?.partialRecovery ?? 0,
-      dropped: data.syncBuffer?.dropped ?? 0,
-      incomplete: data.syncBuffer?.incomplete ?? 0,
-      trueSyncRate: data.syncBuffer?.trueSyncRate ?? 0,
-    };
+    const syncBuffer = deriveSyncBufferMetrics(data);
+    const transportSyncQualityOk =
+      syncBuffer.transportSyncRate > 50 || syncBuffer.completedFrames < 10;
 
     const readiness = {
       tdmaRunning: data.readiness?.tdmaRunning ?? false,
       hasAliveNodes: data.readiness?.hasAliveNodes ?? false,
       bufferReady: data.readiness?.bufferReady ?? false,
-      syncQualityOk: data.readiness?.syncQualityOk ?? false,
-      syncRate: data.readiness?.syncRate ?? 0,
+      syncQualityOk: transportSyncQualityOk,
+      syncRate: syncBuffer.transportSyncRate,
+      strictSyncRate: syncBuffer.strictTrueSyncRate,
     };
 
     const nodeCount = data.nodeCount ?? 0;
 
     // Warm-up compatibility mode:
     // When TDMA is running and completed frames are already flowing, do not
-    // block readiness on trueSyncRate threshold. Early in startup, mixed node
-    // timing can produce low trueSync even though usable data is present.
+    // block readiness on strict network sync threshold. Early in startup,
+    // mixed node timing can produce low all-sensors-per-frame sync even when
+    // packet-local transport is healthy and usable data is present.
     const hasFlowingFrames =
       syncBuffer.initialized && syncBuffer.completedFrames > 0;
     const relaxedReady =
@@ -452,7 +485,7 @@ export class SyncReadiness {
       }
       console.debug(
         `[SyncReadiness] System ready in ${elapsed}ms (${this.pollCount} polls, ` +
-          `${nodes.length} nodes, sync rate: ${syncBuffer.trueSyncRate.toFixed(1)}%)`,
+          `${nodes.length} nodes, completedFrames=${syncBuffer.completedFrames})`,
       );
       this.resolveReady();
     }
@@ -482,12 +515,16 @@ export class SyncReadiness {
       syncBuffer: {
         initialized: false,
         expectedSensors: 0,
+        authoritativeExpectedSensors: 0,
+        activeStreamingSensors: 0,
         completedFrames: 0,
         trulyComplete: 0,
         partialRecovery: 0,
         dropped: 0,
         incomplete: 0,
         trueSyncRate: 0,
+        strictTrueSyncRate: 0,
+        transportSyncRate: 0,
       },
       ready: false,
       readySource: "none",
@@ -499,6 +536,7 @@ export class SyncReadiness {
         bufferReady: false,
         syncQualityOk: false,
         syncRate: 0,
+        strictSyncRate: 0,
       },
       elapsedMs: 0,
       pollCount: 0,
@@ -537,18 +575,6 @@ export class SyncReadiness {
 
       if (!state.readiness.bufferReady) {
         reasons.push("No completed synchronized frames yet");
-      }
-    }
-
-    if (!state.readiness.syncQualityOk) {
-      if (state.syncBuffer.completedFrames > 0) {
-        reasons.push(
-          `Sync quality warming up (${state.readiness.syncRate.toFixed(1)}% true sync rate)`,
-        );
-      } else {
-        reasons.push(
-          `Sync quality below threshold (${state.readiness.syncRate.toFixed(1)}% true sync rate)`,
-        );
       }
     }
 

@@ -507,8 +507,15 @@ void SyncManager::handleTDMASchedule(const uint8_t *data, int len)
     }
     else
     {
-        Serial.printf("[TDMA] WARNING: Our nodeId %d not found in schedule!\n",
-                      nodeId);
+        Serial.printf("[TDMA] WARNING: Our nodeId %d not found in schedule "
+                      "(%d nodes in schedule)!\n",
+                      nodeId, scheduleNodeCount);
+        // Log all schedule entries for debugging
+        for (int i = 0; i < scheduleNodeCount; i++)
+        {
+            Serial.printf("[TDMA]   Schedule[%d]: nodeId=%d\n",
+                          i, schedule->slots[i].nodeId);
+        }
         // Fix: Go to UNREGISTERED so update() loop triggers re-registration
         // Previously stuck in TDMA_NODE_REGISTERED without inRecoveryMode =
         // deadlock
@@ -518,8 +525,14 @@ void SyncManager::handleTDMASchedule(const uint8_t *data, int len)
             if (onStateChangeCallback)
                 onStateChangeCallback(tdmaNodeState);
 
-            // Force immediate retry
-            sendTDMARegistration();
+            // RELIABILITY FIX: Defer re-registration to update() context.
+            // sendTDMARegistration() calls esp_now_send() — doing this from
+            // inside the ESP-NOW receive callback (WiFi task) adds latency
+            // and can cause packet loss. Use pendingReRegistration flag
+            // like the beacon handler does.
+            portENTER_CRITICAL(&syncStateLock);
+            pendingReRegistration = true;
+            portEXIT_CRITICAL(&syncStateLock);
             lastRegistrationTime = millis();
         }
     }

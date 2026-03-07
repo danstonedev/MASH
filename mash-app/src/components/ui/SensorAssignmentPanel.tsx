@@ -74,7 +74,15 @@ const ROLE_OPTIONS = [
   { label: "Right Hand", value: BodyRole.HAND_R },
 ];
 
-export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
+interface SensorAssignmentPanelProps {
+  emptyStateTitle?: string;
+  emptyStateDescription?: string;
+}
+
+export const SensorAssignmentPanel = memo(function SensorAssignmentPanel({
+  emptyStateTitle = "No sensors available yet",
+  emptyStateDescription = "Waiting for gateway discovery or first sensor packets.",
+}: SensorAssignmentPanelProps) {
   const {
     assignments,
     selectedSensorId,
@@ -92,7 +100,11 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
   const connectedDeviceEntries = useMemo(() => {
     const entries: Array<{ id: string; connected: boolean }> = [];
     devices.forEach((device, id) => {
-      entries.push({ id, connected: !!device.isConnected });
+      entries.push({
+        id,
+        connected:
+          !!device.isConnected && device.connectionHealth !== "offline",
+      });
     });
     return entries;
   }, [devices]);
@@ -113,6 +125,22 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
     return keys;
   }, [nodes]);
 
+  const knownPhysicalKeys = useMemo(() => {
+    const keys = new Set<string>();
+    nodes.forEach((node) => {
+      if (!node.rawNodeId || node.rawNodeId <= 0) return;
+      const count =
+        typeof node.sensorCount === "number" && node.sensorCount > 0
+          ? node.sensorCount
+          : node.sensors.size;
+      if (!count || count <= 0) return;
+      for (let i = 0; i < count; i++) {
+        keys.add(`node_${node.rawNodeId}_s${i}`);
+      }
+    });
+    return keys;
+  }, [nodes]);
+
   // Build the panel list from topology + live devices so sensors are visible
   // even before their first IMU sample arrives.
   // Uses STRING-based dedup (not numeric) to correctly handle physical keys
@@ -120,10 +148,17 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
   const connectedIds = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
+    const topologySet = new Set(topologyDeviceKeys);
+    const hasTopology = topologySet.size > 0;
 
     // Prefer connected live device IDs when available.
     for (const entry of connectedDeviceEntries) {
-      if (entry.connected && !seen.has(entry.id)) {
+      if (!entry.connected) continue;
+      const shouldInclude =
+        !hasTopology ||
+        topologySet.has(entry.id) ||
+        knownPhysicalKeys.has(entry.id);
+      if (shouldInclude && !seen.has(entry.id)) {
         seen.add(entry.id);
         result.push(entry.id);
       }
@@ -148,7 +183,7 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
     }
 
     return result.sort((a, b) => getDeviceSortKey(a) - getDeviceSortKey(b));
-  }, [connectedDeviceEntries, topologyDeviceKeys]);
+  }, [connectedDeviceEntries, topologyDeviceKeys, knownPhysicalKeys]);
 
   // EMPTY STATE
   if (connectedIds.length === 0) {
@@ -159,10 +194,10 @@ export const SensorAssignmentPanel = memo(function SensorAssignmentPanel() {
         </div>
         <div>
           <h3 className="text-sm font-medium text-white/80">
-            No Sensors Connected
+            {emptyStateTitle}
           </h3>
           <p className="text-[11px] text-white/40 mt-1">
-            Connect devices to configure mapping.
+            {emptyStateDescription}
           </p>
         </div>
       </div>

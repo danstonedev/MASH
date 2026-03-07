@@ -1,5 +1,7 @@
 # MASH System Audit: Firmware + Webapp Data Pipeline
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** Delta compression (0x26 "node delta", 0x27 "SyncFrame delta") has been fully removed. `TDMANodeDeltaPacket` renamed to `TDMANodeDataPacket`, `decodeNodeDelta()` renamed to `decodeNodeData()`. V3 packet format (0x24) and `TDMADataPacket` (0x23) removed. All nodes use `TDMA_PACKET_NODE_DATA` (0x26) keyframe-only. See `TDMAProtocol.h` for current definitions.
+
 **Date:** February 8, 2026  
 **Scope:** Complete audit of the ESP-NOW TDMA system — Node firmware, Gateway firmware, shared protocol definitions, USB Serial transport, and webapp data parsing  
 **Goal Standard:** 16 IMU sensors across 4–8 ESP32-S3 nodes → Gateway → USB → Webapp, 200 time-synchronized samples/sec/sensor, 99.5% reliability

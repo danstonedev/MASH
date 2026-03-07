@@ -8,7 +8,7 @@
  * - Summary statistics
  */
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { usePlaybackStore } from "../../store/usePlaybackStore";
 import {
-  analyzeGaps,
   coverageColor,
   gradeColor,
   severityBg,
@@ -38,24 +37,10 @@ import {
 // ============================================================================
 
 export function GapAnalysisReport() {
-  const sessionId = usePlaybackStore((s) => s.sessionId);
-  const frames = usePlaybackStore((s) => s.frames);
-  const frameRate = usePlaybackStore((s) => s.frameRate);
-  const duration = usePlaybackStore((s) => s.duration);
+  const report = usePlaybackStore((s) => s.gapReport);
 
   const [expanded, setExpanded] = useState(true);
   const [selectedSensor, setSelectedSensor] = useState<number | null>(null);
-
-  // Run analysis when frames change
-  const report = useMemo(() => {
-    if (!sessionId || frames.length === 0) return null;
-    return analyzeGaps(
-      frames,
-      sessionId,
-      frameRate || undefined,
-      duration || undefined,
-    );
-  }, [sessionId, frames, frameRate, duration]);
 
   if (!report) return null;
 
@@ -160,23 +145,45 @@ function SummaryStats({ report }: { report: GapReport }) {
     (sum, s) => sum + s.gaps.filter((g) => g.severity === "critical").length,
     0,
   );
+  const transportValue = report.packetLocalMode
+    ? report.transportCoveragePercent
+    : report.syncCoveragePercent;
+
+  // Frame Sync: In packet-local mode (multi-node ESP-NOW), each node sends its
+  // own frame numbers so cross-node epoch matching is N/A. Show per-node
+  // transport completeness instead.
+  const frameSyncPercent = report.packetLocalMode
+    ? report.transportCoveragePercent
+    : report.strictEpochCoveragePercent;
+  const frameSyncTitle = report.packetLocalMode
+    ? `Per-node transport completeness: ${report.transportCompleteFrames} of ${report.uniqueFrameNumbers} frame groups delivered all expected node sensors`
+    : `${report.fullyPopulatedFrames} of ${report.uniqueFrameNumbers} frames had all ${report.sensorCount} sensors`;
 
   return (
     <div className="grid grid-cols-4 gap-1.5">
       <StatCell
-        label="Coverage"
-        value={`${report.globalCoveragePercent}%`}
-        className={coverageColor(report.globalCoveragePercent)}
+        label="Frame Sync"
+        value={`${frameSyncPercent}%`}
+        className={coverageColor(frameSyncPercent)}
+        title={frameSyncTitle}
       />
       <StatCell
-        label="Sync"
-        value={`${report.syncCoveragePercent}%`}
-        className={coverageColor(report.syncCoveragePercent)}
+        label="Timeline"
+        value={`${report.timelineCoveragePercent}%`}
+        className={coverageColor(report.timelineCoveragePercent)}
       />
       <StatCell
-        label="Gaps"
-        value={totalGaps.toString()}
-        className={totalGaps === 0 ? "text-green-400" : "text-yellow-400"}
+        label={report.packetLocalMode ? "Transport" : "Gaps"}
+        value={
+          report.packetLocalMode ? `${transportValue}%` : totalGaps.toString()
+        }
+        className={
+          report.packetLocalMode
+            ? coverageColor(transportValue)
+            : totalGaps === 0
+              ? "text-green-400"
+              : "text-yellow-400"
+        }
       />
       <StatCell
         label="Critical"
@@ -197,14 +204,19 @@ function StatCell({
   value,
   className,
   icon,
+  title,
 }: {
   label: string;
   value: string;
   className: string;
   icon?: React.ReactNode;
+  title?: string;
 }) {
   return (
-    <div className="bg-bg-surface rounded px-2 py-1.5 text-center">
+    <div
+      className="bg-bg-surface rounded px-2 py-1.5 text-center"
+      title={title}
+    >
       <div
         className={`text-sm font-bold flex items-center justify-center gap-1 ${className}`}
       >
@@ -231,18 +243,18 @@ function SensorCoverageBars({
   selectedSensor: number | null;
   onSelectSensor: (id: number | null) => void;
 }) {
-  const { sensorReports, firstFrame, lastFrame } = report;
-  const totalSpan = lastFrame - firstFrame + 1;
+  const { sensorReports, sessionStartTimeMs, sessionEndTimeMs } = report;
+  const totalSpanMs = Math.max(1, sessionEndTimeMs - sessionStartTimeMs);
 
   // Register all raw sensor IDs so display names are sequential
   registerSensorIds(sensorReports.map((sr) => sr.sensorId));
 
-  if (totalSpan <= 0) return null;
+  if (totalSpanMs <= 0) return null;
 
   return (
     <div className="space-y-1">
       <div className="text-[9px] text-text-secondary uppercase font-semibold mb-1">
-        Sensor Coverage Timeline
+        Sensor Stream Timeline
       </div>
       {sensorReports.map((sr) => {
         const isSelected = selectedSensor === sr.sensorId;
@@ -267,8 +279,8 @@ function SensorCoverageBars({
             <div className="flex-1 h-4 bg-bg-surface rounded-sm overflow-hidden relative">
               <CoverageBar
                 sensorReport={sr}
-                firstFrame={firstFrame}
-                totalSpan={totalSpan}
+                sessionStartTimeMs={sessionStartTimeMs}
+                totalSpanMs={totalSpanMs}
               />
             </div>
 
@@ -292,18 +304,18 @@ function SensorCoverageBars({
  */
 function CoverageBar({
   sensorReport,
-  firstFrame,
-  totalSpan,
+  sessionStartTimeMs,
+  totalSpanMs,
 }: {
   sensorReport: SensorReport;
-  firstFrame: number;
-  totalSpan: number;
+  sessionStartTimeMs: number;
+  totalSpanMs: number;
 }) {
-  const { gaps, firstFrame: sFirst, lastFrame: sLast } = sensorReport;
+  const { gaps, firstTimeMs, lastTimeMs } = sensorReport;
 
-  // Calculate the sensor's active region within the global span
-  const startPct = ((sFirst - firstFrame) / totalSpan) * 100;
-  const endPct = ((sLast - firstFrame + 1) / totalSpan) * 100;
+  // Calculate the sensor's active region within the session timeline.
+  const startPct = ((firstTimeMs - sessionStartTimeMs) / totalSpanMs) * 100;
+  const endPct = ((lastTimeMs - sessionStartTimeMs) / totalSpanMs) * 100;
   const widthPct = endPct - startPct;
 
   return (
@@ -314,10 +326,11 @@ function CoverageBar({
         style={{ left: `${startPct}%`, width: `${widthPct}%` }}
       />
 
-      {/* Gap overlays (red marks) */}
+      {/* Gap overlays — every gap is a genuinely missing gateway frame */}
       {gaps.map((gap, i) => {
-        const gapStart = ((gap.startFrame - firstFrame) / totalSpan) * 100;
-        const gapWidth = Math.max((gap.gapLength / totalSpan) * 100, 0.5); // min 0.5% for visibility
+        const gapStart =
+          ((gap.startTimeMs - sessionStartTimeMs) / totalSpanMs) * 100;
+        const gapWidth = Math.max((gap.gapDurationMs / totalSpanMs) * 100, 0.5);
 
         const gapColor =
           gap.severity === "critical"
@@ -331,7 +344,7 @@ function CoverageBar({
             key={i}
             className={`absolute top-0 h-full ${gapColor}`}
             style={{ left: `${gapStart}%`, width: `${gapWidth}%` }}
-            title={`Gap: ${gap.gapLength} frames (${gap.gapDurationMs.toFixed(1)}ms)`}
+            title={`Gap: ${gap.gapDurationMs.toFixed(1)}ms (${gap.gapLength} missing frame${gap.gapLength > 1 ? "s" : ""})`}
           />
         );
       })}

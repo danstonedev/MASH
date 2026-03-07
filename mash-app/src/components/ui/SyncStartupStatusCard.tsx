@@ -3,12 +3,9 @@ import {
   CheckCircle2,
   Circle,
   Loader2,
-  Wifi,
-  Radio,
   ShieldAlert,
-  X,
 } from "lucide-react";
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo } from "react";
 import { useDeviceStore } from "../../store/useDeviceStore";
 import { cn } from "../../lib/utils";
 
@@ -52,22 +49,6 @@ function phaseToStep(
   }
 }
 
-/** Dynamic ETA based on TDMA state */
-function estimateRemainingSeconds(
-  tdmaState: string,
-  elapsedMs: number,
-  completedFrames: number,
-): string {
-  if (tdmaState === "running" && completedFrames > 0) return "~1s";
-  if (tdmaState === "running") return "~3s";
-  if (tdmaState === "sync") return "~5s";
-  if (tdmaState === "discovery") {
-    const remainDiscovery = Math.max(0, 10 - Math.floor(elapsedMs / 1000));
-    return `~${remainDiscovery + 3}s`;
-  }
-  return "~10s";
-}
-
 // ============================================================================
 // Component
 // ============================================================================
@@ -75,32 +56,11 @@ function estimateRemainingSeconds(
 export function SyncStartupStatusCard() {
   const { isConnected, syncReady, syncPhase, syncState, pollSyncStatus } =
     useDeviceStore();
-  const [isHidden, setIsHidden] = useState(false);
-  const [elapsedDisplay, setElapsedDisplay] = useState(0);
-  const startRef = useRef<number | null>(null);
-
-  // Local elapsed timer (smoother than relying on poll intervals)
-  useEffect(() => {
-    if (isConnected && !syncReady) {
-      startRef.current = Date.now();
-      const timer = setInterval(() => {
-        setElapsedDisplay(
-          Math.floor((Date.now() - (startRef.current ?? Date.now())) / 1000),
-        );
-      }, 500);
-      return () => clearInterval(timer);
-    }
-    startRef.current = null;
-    setElapsedDisplay(0);
-  }, [isConnected, syncReady]);
-
-  const shouldShow = isConnected && !syncReady && !isHidden;
 
   const derived = useMemo(() => {
     const nodes = syncState?.nodes ?? [];
     const aliveNodes = nodes.filter((n) => n.alive).length;
     const detectedSensors = nodes.reduce((s, n) => s + (n.sensorCount || 0), 0);
-    const syncRate = syncState?.syncBuffer.trueSyncRate ?? 0;
     const completedFrames = syncState?.syncBuffer.completedFrames ?? 0;
     const failureReasons = syncState?.failureReasons ?? [];
     const failureReason =
@@ -111,24 +71,19 @@ export function SyncStartupStatusCard() {
       nodes,
       aliveNodes,
       detectedSensors,
-      syncRate,
       completedFrames,
       failureReason,
       failureReasons,
     };
   }, [syncState]);
 
-  if (!shouldShow) return null;
-
   const phase = syncPhase || "connecting";
   const { activeStep, failed } = phaseToStep(phase, syncState?.nodeCount ?? 0);
   const isFailure = failed;
-  const tdmaState = syncState?.tdmaState ?? "idle";
-  const eta = estimateRemainingSeconds(
-    tdmaState,
-    syncState?.elapsedMs ?? 0,
-    derived.completedFrames,
-  );
+
+  // Primary setup guidance now lives in DevicePanel. This global card remains
+  // only as an interrupt surface when sync/readiness fails.
+  if (!isConnected || syncReady || !isFailure) return null;
 
   return (
     <div className="fixed top-20 right-4 z-50 w-80 max-w-[calc(100vw-2rem)]">
@@ -141,28 +96,17 @@ export function SyncStartupStatusCard() {
         {/* Header */}
         <div className="flex items-start justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">
-            {isFailure ? (
-              <ShieldAlert className="h-5 w-5 text-danger shrink-0" />
-            ) : (
-              <Loader2 className="h-5 w-5 text-accent shrink-0 animate-spin" />
-            )}
+            <ShieldAlert className="h-5 w-5 text-danger shrink-0" />
             <div>
               <div className="text-sm font-semibold text-text-primary">
-                Starting Up
+                Sync Attention Required
               </div>
               <div className="text-[11px] text-text-secondary">
-                {elapsedDisplay}s elapsed
-                {!isFailure && <> &middot; ETA {eta}</>}
+                Setup did not complete cleanly. Check the sidebar status and
+                retry.
               </div>
             </div>
           </div>
-          <button
-            onClick={() => setIsHidden(true)}
-            className="p-1 hover:bg-bg-elevated rounded-md transition-colors"
-            title="Hide"
-          >
-            <X className="h-4 w-4 text-text-secondary" />
-          </button>
         </div>
 
         {/* Stepper */}
@@ -256,72 +200,32 @@ export function SyncStartupStatusCard() {
           </div>
         )}
 
-        {/* Sync Quality (once syncing) */}
-        {activeStep >= 2 && derived.syncRate > 0 && (
-          <div className="rounded-lg border border-border bg-bg-elevated p-2 mb-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-text-secondary">Sync Rate</span>
-              <span
-                className={cn(
-                  "font-semibold",
-                  derived.syncRate >= 80
-                    ? "text-success"
-                    : derived.syncRate >= 50
-                      ? "text-warning"
-                      : "text-danger",
-                )}
-              >
-                {derived.syncRate.toFixed(0)}%
-              </span>
-            </div>
-            <div className="mt-1 h-1 rounded-full bg-border overflow-hidden">
-              <div
-                className={cn(
-                  "h-full rounded-full transition-all duration-500",
-                  derived.syncRate >= 80
-                    ? "bg-success"
-                    : derived.syncRate >= 50
-                      ? "bg-warning"
-                      : "bg-danger",
-                )}
-                style={{ width: `${Math.min(100, derived.syncRate)}%` }}
-              />
-            </div>
-          </div>
-        )}
-
         {/* Failure Panel */}
-        {isFailure && (
-          <div className="rounded-lg border border-danger/40 bg-danger/10 p-2 mb-3">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-danger mt-0.5 shrink-0" />
-              <div className="text-xs text-text-primary">
-                <div className="font-medium mb-1">Sync failed</div>
-                <div>
-                  {derived.failureReason ||
-                    "Readiness checks did not complete."}
-                </div>
-                {derived.failureReasons.length > 1 && (
-                  <ul className="mt-1.5 list-disc pl-4 space-y-0.5 text-text-secondary">
-                    {derived.failureReasons.slice(1).map((reason, i) => (
-                      <li key={`${reason}-${i}`}>{reason}</li>
-                    ))}
-                  </ul>
-                )}
+        <div className="rounded-lg border border-danger/40 bg-danger/10 p-2 mb-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-danger mt-0.5 shrink-0" />
+            <div className="text-xs text-text-primary">
+              <div className="font-medium mb-1">Sync failed</div>
+              <div>
+                {derived.failureReason || "Readiness checks did not complete."}
               </div>
+              {derived.failureReasons.length > 1 && (
+                <ul className="mt-1.5 list-disc pl-4 space-y-0.5 text-text-secondary">
+                  {derived.failureReasons.slice(1).map((reason, i) => (
+                    <li key={`${reason}-${i}`}>{reason}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Retry button (visible on failure) */}
-        {isFailure && (
-          <button
-            onClick={() => void pollSyncStatus()}
-            className="w-full rounded-lg border border-border px-3 py-2 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            Retry Sync Check
-          </button>
-        )}
+        <button
+          onClick={() => void pollSyncStatus()}
+          className="w-full rounded-lg border border-border px-3 py-2 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+        >
+          Retry Sync Check
+        </button>
       </div>
     </div>
   );

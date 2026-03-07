@@ -37,7 +37,6 @@ import { footContactDetector } from "./skeleton/FootContactDetector";
 import {
   extractBonesFromModel,
   computeTargetPose,
-  logBonePositions,
 } from "./skeleton/SkeletonLoader";
 
 import {
@@ -102,17 +101,7 @@ export function SkeletonModel() {
   // TEMPORARILY DISABLED: Testing direct bone-setting path with world→local fix
   const [useFKChain] = useState(false);
 
-  // Track calibration state for one-time diagnostic logging
-  const wasCalibrated = useRef(false);
-  const pendingPostCalDeltaLogRef = useRef(false);
-  const postCalDeltaRowsRef = useRef<
-    Array<{
-      segment: string;
-      deltaDeg: number;
-      rawEuler: string;
-      calibratedEuler: string;
-    }>
-  >([]);
+
 
   // Drift monitor update throttle (per sensor) to avoid over-driving monitor state.
   // DriftMonitor is designed around ~10Hz updates rather than every render tick.
@@ -161,15 +150,6 @@ export function SkeletonModel() {
     });
     setTargetNeutralPose(poseMap);
 
-    console.debug(
-      "[SkeletonModel] Bones loaded:",
-      bonesMap.size,
-      "bones. Setting isReady=true",
-    );
-
-    // Log bone positions for debugging
-    logBonePositions(bonesMap, BONE_TARGET_OFFSETS);
-
     setIsReady(true);
   }, [model, setTargetNeutralPose]);
 
@@ -201,11 +181,6 @@ export function SkeletonModel() {
       // Set last elapsed time to NOW so the first delta is small/zero
       lastElapsedTimeRef.current = state.clock.elapsedTime;
 
-      console.debug(
-        `[SkeletonModel] Mode changed to ${
-          isPlaybackMode ? "PLAYBACK" : "LIVE"
-        } - Smoothers & Timing Reset (Sync)`,
-      );
       prevModeRef.current = isPlaybackMode;
     }
 
@@ -273,51 +248,8 @@ export function SkeletonModel() {
       storeState.cervicalStep === "verification" ||
       isPlaybackMode;
 
-    // ONE-TIME calibration diagnostic: Log all offsets when first entering calibrated state
-    if (isCalibrated && !wasCalibrated.current) {
-      wasCalibrated.current = true;
-      pendingPostCalDeltaLogRef.current = !isPlaybackMode;
-      postCalDeltaRowsRef.current = [];
-      // Reset head frame counter for fresh post-cal diagnostics
-      (window as any).__headFrameCount = 0;
-    } else if (!isCalibrated && wasCalibrated.current) {
-      // Reset if calibration was reset
-      wasCalibrated.current = false;
-      pendingPostCalDeltaLogRef.current = false;
-      postCalDeltaRowsRef.current = [];
-    }
-
-    // Debug logging every 5 seconds
-    const frameCount = Math.floor(state.clock.elapsedTime * 60);
-    const shouldLog = frameCount % 300 === 0;
-
-    // =====================================================================
-    // CALIBRATION FLOW DIAGNOSTIC - Logs every 5 seconds during calibration
-    // =====================================================================
-    if (shouldLog) {
-      const calibStep = storeState.calibrationStep;
-      console.debug(
-        `[SkeletonModel] Frame ${frameCount}: calibrationStep="${calibStep}", devices=${currentDevices.size}, isCalibrated=${isCalibrated}`,
-      );
-
-      // Log cache status for first device
-      const firstDevice = currentDevices.values().next().value;
-      if (firstDevice) {
-        const cacheQuat = (window as any).__deviceQuaternionCache?.get?.(
-          firstDevice.id,
-        );
-        console.debug(
-          `[SkeletonModel] Cache check for ${
-            firstDevice.id
-          }: quatInCache=${!!cacheQuat}`,
-        );
-      }
-    }
-
     // Safety check - ensure devices is iterable
     if (!currentDevices || currentDevices.size === 0) {
-      if (shouldLog)
-        console.debug("[SkeletonModel] Early exit: No devices available");
       return;
     }
 
@@ -325,17 +257,10 @@ export function SkeletonModel() {
     // Without this, the model will immediately contort to match the raw sensor orientation (often flat on a table),
     // causing user confusion before they have a chance to calibrate.
     if (!isCalibrated) {
-      if (shouldLog) {
-        console.debug(
-          `[SkeletonModel] NOT CALIBRATED — calibrationStep="${storeState.calibrationStep}", ` +
-            `cervicalStep="${storeState.cervicalStep}", playback=${isPlaybackMode}`,
-        );
-      }
       return; // Don't animate any bones before calibration
     }
     // Skip direct bone-setting when FK chain mode is active
     // FK mode handles all bone rotations via ForwardKinematics solver
-    let bonesUpdated = 0; // DIAGNOSTIC counter
     if (!useFKChain) {
       // ── TOPOLOGICAL SORT ──────────────────────────────────────────────
       // Process parent segments before children so that:
@@ -354,29 +279,13 @@ export function SkeletonModel() {
       );
 
       for (const { device, segment } of deviceArray) {
-        if (!segment) {
-          if (shouldLog)
-            console.debug(
-              `[SkeletonModel] Device ${device.id}: no segment assignment (assignments: ${assignmentStore.assignments.size})`,
-            );
-          continue;
-        }
+        if (!segment) continue;
 
         const boneName = SEGMENT_TO_BONE[segment];
-        if (!boneName) {
-          if (shouldLog)
-            console.debug(
-              `[SkeletonModel] Segment "${segment}": no bone mapping`,
-            );
-          continue;
-        }
+        if (!boneName) continue;
 
         const bone = boneMap.get(boneName);
-        if (!bone) {
-          if (shouldLog)
-            console.debug(`[SkeletonModel] Bone "${boneName}": not in boneMap`);
-          continue;
-        }
+        if (!bone) continue;
 
         // -------------------------------------------------------------------------
         // 2. FETCH DATA (Unified Path for Playback)
@@ -409,18 +318,6 @@ export function SkeletonModel() {
               segment,
             );
 
-            // Log for diagnostics
-            if (shouldLog && segment === "head") {
-              const e = new THREE.Euler().setFromQuaternion(
-                processedQuat,
-                "XYZ",
-              );
-              console.debug(
-                `[HeadMotion] Playback Body Quat: [${((e.x * 180) / Math.PI).toFixed(1)}, ${((e.y * 180) / Math.PI).toFixed(1)}, ${((e.z * 180) / Math.PI).toFixed(1)}]`,
-              );
-            }
-
-            bonesUpdated++;
           }
           // Skip the legacy live-mode processing for this device
           continue;
@@ -430,16 +327,7 @@ export function SkeletonModel() {
         // 3. FETCH DATA (Legacy Live Path)
         // -------------------------------------------------------------------------
         const sensorData = getSensorData(device.id);
-        if (!sensorData) {
-          if (shouldLog)
-            console.debug(
-              `[SkeletonModel] Device ${device.id}: no sensor data`,
-            );
-          continue;
-        }
-
-        // Track successful updates
-        bonesUpdated++;
+        if (!sensorData) continue;
 
         // Destructure standardized data
         // Note: quatArray must be treated as immutable from the getter, so we copy if needed
@@ -464,45 +352,22 @@ export function SkeletonModel() {
           quatArray = tempPool.quatArray;
         }
 
-        // DIAGNOSTIC: Log raw cache value for first device once per second
-        if (shouldLog && segment === "thigh_r") {
-          const rawCache = (window as any).__deviceQuaternionCache?.get?.(
-            device.id,
-          );
-          console.debug(
-            `[SkeletonModel] RAW CACHE ${device.id}: [${
-              rawCache?.map((v: number) => v.toFixed(3)).join(", ") || "null"
-            }]`,
-          );
-          console.debug(
-            `[SkeletonModel] getSensorData returned: [${quatArray
-              .map((v) => v.toFixed(3))
-              .join(", ")}]`,
-          );
-        }
-
         // -------------------------------------------------------------------------
-        // 3. SMOOTHING (Pre-Process) - DISABLED FOR DEBUGGING
+        // 3. SMOOTHING (Pre-Process)
         // -------------------------------------------------------------------------
 
         // Convert to THREE.Quaternion (Reusing tempPool.targetQuat)
         arrayToThreeQuat(quatArray, tempPool.targetQuat);
 
-        // SMOOTHING DISABLED: Pass through raw quaternion for debugging axis issues
-        // TODO: Re-enable smoothing once axis mapping is confirmed correct
-        tempPool.smoothedQuat.copy(tempPool.targetQuat);
+        // Adaptive SLERP smoothing via per-sensor QuaternionSmoother
+        const smoother = getSmoother(device.id);
+        const gyroMag = gyro
+          ? Math.sqrt(gyro[0] * gyro[0] + gyro[1] * gyro[1] + gyro[2] * gyro[2])
+          : null;
+        smoother.updateInPlace(tempPool.targetQuat, tempPool.smoothedQuat, isPlaybackMode ? null : gyroMag);
 
         // Write smoothed result back to temp array for the processor
         copyToArray(tempPool.smoothedQuat, tempPool.quatArray);
-
-        // DIAGNOSTIC: Log smoothing effect
-        if (shouldLog && segment === "thigh_r") {
-          console.debug(
-            `[SkeletonModel] AFTER PROCESSING: [${tempPool.quatArray
-              .map((v) => v.toFixed(3))
-              .join(", ")}], mode=${isPlaybackMode ? "PLAYBACK" : "LIVE"}`,
-          );
-        }
 
         quatArray = tempPool.quatArray;
 
@@ -513,33 +378,8 @@ export function SkeletonModel() {
         const mountingStore = useMountingRotationStore.getState();
         const mountingRot = mountingStore.getMountingRotation(device.id);
 
-        // DIAGNOSTIC: Log tare state once per second
-        if (shouldLog) {
-          const hasTare = tareState && tareState.mountingTareTime > 0;
-          console.debug(
-            `[SkeletonModel] Segment "${segment}" tare: ${
-              hasTare ? "HAS TARE" : "NO TARE (identity)"
-            }`,
-          );
-        }
-
         const calibData = storeState.getCalibration(segment);
         const calibrationOffset = calibData ? calibData.offset : undefined;
-
-        // DIAGNOSTIC CHECK for Opposite Direction
-        if (shouldLog && segment === "head") {
-          if (calibrationOffset) {
-            const e = new THREE.Euler().setFromQuaternion(
-              calibrationOffset,
-              "XYZ",
-            );
-            console.debug(
-              `[SkeletonModel] head Offset: [${calibrationOffset.toArray().map((v) => v.toFixed(3))}], Euler: ${e.x.toFixed(2)}, ${e.y.toFixed(2)}, ${e.z.toFixed(2)}`,
-            );
-          } else {
-            console.debug(`[SkeletonModel] head Offset: MISSING`);
-          }
-        }
 
         const orientationResult = orientationProcessor.processQuaternion(
           quatArray,
@@ -552,38 +392,11 @@ export function SkeletonModel() {
                 ? undefined
                 : mountingRot || undefined,
             // calibrationOffset: calibrationOffset, // REMOVED: Legacy double-application. TareState handles L1 Mounting Tare.
-            enableLogging: shouldLog,
+            enableLogging: false,
           },
         );
 
         if (orientationResult) {
-          if (pendingPostCalDeltaLogRef.current && !isPlaybackMode) {
-            const rawQuat = new THREE.Quaternion(
-              quatArray[1],
-              quatArray[2],
-              quatArray[3],
-              quatArray[0],
-            );
-            const deltaDeg =
-              (rawQuat.angleTo(orientationResult.worldQuat) * 180) / Math.PI;
-
-            const rawEuler = new THREE.Euler().setFromQuaternion(
-              rawQuat,
-              "XYZ",
-            );
-            const calibratedEuler = new THREE.Euler().setFromQuaternion(
-              orientationResult.worldQuat,
-              "XYZ",
-            );
-
-            postCalDeltaRowsRef.current.push({
-              segment,
-              deltaDeg,
-              rawEuler: `${((rawEuler.x * 180) / Math.PI).toFixed(1)}, ${((rawEuler.y * 180) / Math.PI).toFixed(1)}, ${((rawEuler.z * 180) / Math.PI).toFixed(1)}`,
-              calibratedEuler: `${((calibratedEuler.x * 180) / Math.PI).toFixed(1)}, ${((calibratedEuler.y * 180) / Math.PI).toFixed(1)}, ${((calibratedEuler.z * 180) / Math.PI).toFixed(1)}`,
-            });
-          }
-
           // ── CROSS-SENSOR HEADING COHERENCE ──
           // enforceHeadingCoherence first (reads PARENT's cached quat), then
           // cache the corrected quat so CHILD segments see the post-correction
@@ -608,90 +421,9 @@ export function SkeletonModel() {
             segment,
           );
 
-          // HEAD MOTION DIAGNOSTIC (first 5 frames post-cal + every 10s)
-          if (segment === "head") {
-            const headFrameCount = (window as any).__headFrameCount || 0;
-            if (wasCalibrated.current)
-              (window as any).__headFrameCount = headFrameCount + 1;
-            if (
-              (wasCalibrated.current && headFrameCount < 5) ||
-              (segment === "head" && shouldLog)
-            ) {
-              const e = new THREE.Euler().setFromQuaternion(
-                orientationResult.worldQuat,
-                "XYZ",
-              );
-              const boneE = new THREE.Euler().setFromQuaternion(
-                bone.quaternion,
-                "XYZ",
-              );
-              const rad2deg = 180 / Math.PI;
-              console.debug(
-                `[HeadMotion] #${headFrameCount} Raw:[${quatArray.map((v) => v.toFixed(3)).join(",")}] ` +
-                  `World:[${(e.x * rad2deg).toFixed(1)},${(e.y * rad2deg).toFixed(1)},${(e.z * rad2deg).toFixed(1)}] ` +
-                  `Bone:[${(boneE.x * rad2deg).toFixed(1)},${(boneE.y * rad2deg).toFixed(1)},${(boneE.z * rad2deg).toFixed(1)}]`,
-              );
-            }
-          }
-
-          // DIAGNOSTIC: Track foot/knee bone updates specifically
-          if ((segment === "foot_l" || segment === "tibia_l") && shouldLog) {
-            const e = new THREE.Euler().setFromQuaternion(
-              bone.quaternion,
-              "XYZ",
-            );
-            const rad2deg = 180 / Math.PI;
-            console.debug(
-              `[BoneTrack] ${segment} → ${boneName} → [${(e.x * rad2deg).toFixed(1)}°, ${(
-                e.y * rad2deg
-              ).toFixed(1)}°, ${(e.z * rad2deg).toFixed(1)}°]`,
-            );
-          }
-
-          // Debug Logging for Hip Check
-          if (boneName === "mixamorig1RightUpLeg" && shouldLog) {
-            const e = new THREE.Euler().setFromQuaternion(
-              bone.quaternion,
-              "XYZ",
-            );
-            const rad2deg = 180 / Math.PI;
-            console.debug(
-              `[HipDebug] RightUpLeg: [${(e.x * rad2deg).toFixed(1)}, ${(
-                e.y * rad2deg
-              ).toFixed(1)}, ${(e.z * rad2deg).toFixed(1)}]`,
-            );
-          }
         }
       }
 
-      // DIAGNOSTIC: Summary log
-      if (shouldLog) {
-        console.debug(
-          `[SkeletonModel] Frame summary: ${bonesUpdated}/${currentDevices.size} bones updated`,
-        );
-      }
-
-      if (pendingPostCalDeltaLogRef.current && !isPlaybackMode) {
-        const rows = postCalDeltaRowsRef.current
-          .slice()
-          .sort((a, b) => b.deltaDeg - a.deltaDeg)
-          .map((row) => ({
-            Segment: row.segment,
-            DeltaDeg: row.deltaDeg.toFixed(1),
-            RawEulerXYZ: row.rawEuler,
-            CalibratedEulerXYZ: row.calibratedEuler,
-          }));
-
-        if (rows.length > 0) {
-          console.debug(
-            "[PostCalDelta] First calibrated-frame segment deltas",
-            rows,
-          );
-        }
-
-        pendingPostCalDeltaLogRef.current = false;
-        postCalDeltaRowsRef.current = [];
-      }
     } // End of if (!useFKChain)
 
     // 1.5 Auto-Calibration Runtime Corrections
@@ -934,13 +666,6 @@ export function SkeletonModel() {
       });
     }
   };
-
-  // Selected ID from store
-  // Selected ID from store
-  // const selectedId = useTelemetryStore(state => state.selectedSensorId);
-  // const isPlacementMode = useDeviceRegistry(state => state.isPlacementMode);
-  // const placementType = useDeviceRegistry(state => state.placementType);
-  // const updateSensorTransform = useDeviceRegistry(state => state.updateSensorTransform);
 
   return (
     <group ref={groupRef} position={[0, 0, 0]} scale={[1, 1, 1]}>

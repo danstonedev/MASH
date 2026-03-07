@@ -21,7 +21,7 @@
 #include <SPI.h>
 
 // ============================================================================
-// Display Status — the 5 things a Gateway user needs to know
+// Display Status — the 6 things a Gateway user needs to know
 // ============================================================================
 struct DisplayStatus
 {
@@ -30,6 +30,7 @@ struct DisplayStatus
     bool webAppConnected; // Web app connected via WebSocket
     bool wifiConnected;   // WiFi connected to router
     bool recording;       // Currently streaming / recording data
+    uint8_t tdmaState;    // TDMAState enum value (IDLE/DISCOVERY/SYNC/RUNNING)
 };
 
 // Color definitions (RGB565)
@@ -44,6 +45,8 @@ struct DisplayStatus
 #define COLOR_GRAY 0x7BEF
 #define COLOR_DARKGRAY 0x39E7
 #define COLOR_DARKBLUE 0x1082
+#define COLOR_MAGENTA 0xF81F
+#define COLOR_PURPLE 0x780F
 #define COLOR_BG 0x0000 // Screen background
 
 class DisplayManager
@@ -70,6 +73,7 @@ private:
     int8_t _lastWebApp;
     int8_t _lastWiFi;
     int8_t _lastRecording;
+    int8_t _lastTDMAState;
     uint32_t _lastFullRedraw;
 
     // SPI session management

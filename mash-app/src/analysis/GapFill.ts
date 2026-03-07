@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { dataManager } from "../lib/db";
 import type { RecordedFrame, RecordingSession } from "../lib/db";
+import { downloadBlobPart } from "../lib/export/download";
 
 export type GapFillMethod = "slerp-linear";
 
@@ -52,16 +53,7 @@ const _qNext = new THREE.Quaternion();
 const _qOut = new THREE.Quaternion();
 
 function downloadJSON(obj: unknown, filename: string): void {
-  const json = JSON.stringify(obj, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  void downloadBlobPart(JSON.stringify(obj), filename, "application/json");
 }
 
 function getFrameNumber(frame: RecordedFrame): number {

@@ -61,8 +61,8 @@ enum DeviceRole
 #define BMP390_ADDR 0x76
 #define BMP390_ADDR_ALT 0x77
 
-// Maximum sensors per device
-#define MAX_SENSORS 6
+// Maximum sensors per device (direct I2C, no multiplexer)
+#define MAX_SENSORS 4
 
 // Sensor sampling rates
 #define SENSOR_SAMPLE_RATE_HZ 200 // Internal IMU sample rate

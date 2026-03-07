@@ -323,14 +323,6 @@ export class MovementAnalysisEngine {
       if (this.onActivityChange) this.onActivityChange(analysis);
     }
 
-    // 6. Count Steps / Reps based on Phases
-    if (analysis.activity === "walking" || analysis.activity === "running") {
-      if (gaitState.phase === "heel_strike") {
-        // Debounce step count
-        // this.stepCount++;
-      }
-    }
-
     return analysis;
   }
 
@@ -347,18 +339,6 @@ export class MovementAnalysisEngine {
       const quat = deviceQuaternionCache.get(d.id);
 
       if (accelArr && gyro) {
-        // STA Filter REMOVED - passing raw accel
-        // 1. Get/Create Filter
-        // let filter = this.staFilters.get(d.id);
-        // if (!filter) {
-        //     filter = new STAFilter(60, 'lowpass', 15); // 15Hz Cutoff for general STA
-        //     this.staFilters.set(d.id, filter);
-        // }
-
-        // 2. Filter Accelerometer (Raw)
-        // Note: Accel is usually [x, y, z]
-        // const filtered = filter.update(accelArr[0], accelArr[1], accelArr[2]);
-        // const accelVec = new THREE.Vector3(filtered.x, filtered.y, filtered.z);
         const accelVec = new THREE.Vector3(
           accelArr[0],
           accelArr[1],

@@ -109,8 +109,8 @@ export function MagnetometerCalibrationCard() {
       }
     };
 
-    window.addEventListener("ble-json-packet", handleProgress);
-    return () => window.removeEventListener("ble-json-packet", handleProgress);
+    window.addEventListener("json-packet", handleProgress);
+    return () => window.removeEventListener("json-packet", handleProgress);
   }, []);
 
   const startCalibration = async () => {

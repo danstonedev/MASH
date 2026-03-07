@@ -13,7 +13,7 @@ import { create } from "zustand";
 import type {
   IMUDataPacket,
   EnvironmentalDataPacket,
-} from "../lib/ble/DeviceInterface";
+} from "../lib/protocol/DeviceInterface";
 import {
   dataManager,
   type RecordingSession as DBRecordingSession,
@@ -29,6 +29,10 @@ import {
   sensorIntegrityMonitor,
   IntegrityFlag,
 } from "../lib/diagnostics/SensorIntegrityMonitor";
+import {
+  createRecordingFrameDiagnostics,
+  updateRecordingFrameDiagnostics,
+} from "./recordingFrameDiagnostics";
 
 export interface RecordingSession extends DBRecordingSession {
   // We keep frames out of the store state to avoid React overhead
@@ -228,8 +232,9 @@ function captureSensorMapping(): Record<number, string> {
 // ============================================================
 let _recSyncDiag: {
   frameSensors: Map<number, Set<number>>;
+  frameExpectedCounts: Map<number, number>;
   totalFrames: number;
-  fullFrames: number;
+  completeFrames: number;
   lastReport: number;
   allSensorIds: Set<number>;
 } | null = null;
@@ -584,9 +589,10 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     // Use _batchFrameCount for accurate total (store frameCount may lag due to throttled UI updates)
     const actualFrameCount = _batchFrameCount || frameCount;
 
-    // Calculate per-sensor sample rate (not total-frames / duration)
-    // actualFrameCount is the total number of individual sensor samples recorded.
-    // Divide by the number of unique sensors to get per-sensor Hz.
+    // Calculate per-sensor sample rate from individual recorded sensor samples.
+    // recordFrame() is called once per sensor sample, so actualFrameCount is
+    // already the total number of per-sensor samples written during the session.
+    // Dividing by uniqueSensors yields the true per-sensor sample rate.
     const uniqueSensors = _recSyncDiag?.allSensorIds?.size || 1;
 
     // Hz calculation: Use wall-clock duration (ground truth).
@@ -631,11 +637,12 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
     const dataQuality = _recSyncDiag
       ? {
           totalFrames: _recSyncDiag.totalFrames,
-          completeFrames: _recSyncDiag.fullFrames,
+          completeFrames: _recSyncDiag.completeFrames,
           completenessPercent:
             _recSyncDiag.totalFrames > 0
               ? Math.round(
-                  (_recSyncDiag.fullFrames / _recSyncDiag.totalFrames) * 100,
+                  (_recSyncDiag.completeFrames / _recSyncDiag.totalFrames) *
+                    100,
                 )
               : 0,
           sensorCount: _recSyncDiag.allSensorIds.size,
@@ -949,46 +956,15 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
 
     // =========================================================================
     // RECORDING SYNC DIAGNOSTIC
-    // Track per-frameNumber sensor composition to detect partial frames
-    // Issue #5: Aggregate completeness counters for session dataQuality
+    // Track packet-local group completeness rather than requiring all live
+    // sensors to share a frameNumber. Current 0x25 transport emits local
+    // node groups, so completeness follows each packet's expectedCount.
     // =========================================================================
     if (packet.frameNumber !== undefined) {
       if (!_recSyncDiag) {
-        _recSyncDiag = {
-          frameSensors: new Map(),
-          totalFrames: 0,
-          fullFrames: 0,
-          lastReport: now,
-          allSensorIds: new Set(),
-        };
+        _recSyncDiag = createRecordingFrameDiagnostics(now);
       }
-      const fn = packet.frameNumber;
-      const isNewFrame = !_recSyncDiag.frameSensors.has(fn);
-      if (isNewFrame) {
-        _recSyncDiag.frameSensors.set(fn, new Set());
-        _recSyncDiag.totalFrames++;
-      }
-      const sensorSet = _recSyncDiag.frameSensors.get(fn)!;
-      const wasFull =
-        sensorSet.size === _recSyncDiag.allSensorIds.size && sensorSet.size > 0;
-      sensorSet.add(sensorId);
-      _recSyncDiag.allSensorIds.add(sensorId);
-
-      // If this packet just completed the frame, count it
-      const expectedSensors = _recSyncDiag.allSensorIds.size;
-      if (
-        !wasFull &&
-        expectedSensors > 0 &&
-        sensorSet.size === expectedSensors
-      ) {
-        _recSyncDiag.fullFrames++;
-      }
-
-      // Reset frameSensors window to prevent memory growth (keep counters)
-      if (now - _recSyncDiag.lastReport > 5000) {
-        _recSyncDiag.frameSensors.clear();
-        _recSyncDiag.lastReport = now;
-      }
+      _recSyncDiag = updateRecordingFrameDiagnostics(_recSyncDiag, packet, now);
     }
     // =========================================================================
 

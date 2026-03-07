@@ -10,6 +10,7 @@ import { buildBVHArtifact } from "./BVHExporter";
 import { buildOpenSimStoArtifact } from "./OpenSimExporter";
 import {
   serializeRecordingCsvChunked,
+  serializeSyncFrameCsvChunked,
   serializeSessionJsonChunked,
 } from "./chunkedSerialization";
 import {
@@ -18,7 +19,7 @@ import {
   normalizeExportStage,
 } from "./formatExportStage";
 
-export type ExportFormat = "csv" | "json";
+export type ExportFormat = "csv" | "sync-csv" | "json";
 export type PlaybackExportFormat = "csv" | "c3d" | "bvh" | "opensim";
 export type JsonSchema = "legacy" | "full";
 
@@ -383,6 +384,21 @@ function buildSessionArtifactMain(
   imuFrames: RecordedFrame[],
   envFrames: RecordedEnvFrame[],
 ): ExportArtifact {
+  if (request.format === "sync-csv") {
+    const { csv } = serializeSyncFrameCsvChunked({
+      session,
+      frames: imuFrames,
+    });
+    if (!csv) {
+      throw new Error("Sync CSV generation returned empty output");
+    }
+    return {
+      content: csv,
+      filename: request.filename || `${session.id}_sync.csv`,
+      mimeType: "text/csv",
+    };
+  }
+
   if (request.format === "csv") {
     const csv = serializeRecordingCsvChunked({ session, frames: imuFrames });
     if (!csv) {

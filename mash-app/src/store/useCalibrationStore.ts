@@ -375,6 +375,7 @@ export const useCalibrationStore = create<CalibrationState>()(
     {
       name: "imu-connect-calibration",
       version: 1,
+      migrate: (persistedState: unknown) => persistedState as any,
       // Custom storage with serialization for THREE.Quaternion and Map
       storage: {
         getItem: (name: string) => {

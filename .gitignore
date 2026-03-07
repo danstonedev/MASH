@@ -26,6 +26,10 @@ lerna-debug.log*
 *.sln
 *.sw?
 
+# Debug artifacts & session files
+session_*.json
+imu-connect-debug-capture-*.json
+
 # --- Firmware / Arduino Ignores ---
 # Build files
 imu-connect/dist/

@@ -81,11 +81,11 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len)
 {
     if (!testRunning)
         return;
-    if (len < sizeof(TDMADataPacket))
+    if (len < sizeof(TDMANodeDataPacket))
         return;
 
-    TDMADataPacket *header = (TDMADataPacket *)data;
-    if (header->type != TDMA_PACKET_DATA)
+    TDMANodeDataPacket *header = (TDMANodeDataPacket *)data;
+    if (header->type != TDMA_PACKET_NODE_DATA)
         return;
 
     uint32_t now = millis();

@@ -2,7 +2,7 @@
  * WiFiOTAManager.ts - WiFi-based OTA Firmware Update Manager
  *
  * Handles fast WiFi-based OTA updates via HTTP POST to the Gateway's web server.
- * Much faster than BLE OTA (100-500 KB/s vs 1-5 KB/s).
+ * Much faster than serial OTA.
  */
 
 export interface WiFiOTAProgress {

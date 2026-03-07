@@ -41,7 +41,8 @@ CommandHandler::CommandHandler()
       otaAbortCallback(nullptr), calibrateGyroCallback(nullptr),
       wifiScanCallback(nullptr), startSoftAPCallback(nullptr),
       stopSoftAPCallback(nullptr), getSoftAPStatusCallback(nullptr),
-      clearCalibrationCallback(nullptr), tdmaRescanCallback(nullptr) {}
+      clearCalibrationCallback(nullptr), tdmaRescanCallback(nullptr),
+      clearTopologyCallback(nullptr) {}
 
 String CommandHandler::processCommand(const String &command)
 {
@@ -645,6 +646,24 @@ String CommandHandler::processCommand(const String &command)
     return errorResponse("Pending nodes callback not set");
   }
 
+  // SET_EXPECTED_NODES — set how many nodes discovery should wait for
+  if (strcmp(cmd, "SET_EXPECTED_NODES") == 0)
+  {
+    if (expectedNodesCallback)
+    {
+      uint8_t count = 0;
+      if (doc.containsKey("count"))
+      {
+        count = doc["count"].as<uint8_t>();
+      }
+      expectedNodesCallback(count);
+      char msg[64];
+      snprintf(msg, sizeof(msg), "Expected node count set to %d", count);
+      return successResponse(msg);
+    }
+    return errorResponse("Expected nodes callback not set");
+  }
+
   // TDMA_RESCAN — wipe node table and restart full discovery
   if (strcmp(cmd, "TDMA_RESCAN") == 0)
   {
@@ -654,6 +673,18 @@ String CommandHandler::processCommand(const String &command)
       return successResponse("TDMA re-scan started");
     }
     return errorResponse("TDMA rescan callback not set");
+  }
+
+  // CLEAR_TOPOLOGY — erase NVS-persisted topology and restart discovery
+  // Use when stale NVS data causes phantom sensors (e.g. old mux-era entries)
+  if (strcmp(cmd, "CLEAR_TOPOLOGY") == 0)
+  {
+    if (clearTopologyCallback)
+    {
+      clearTopologyCallback();
+      return successResponse("Topology cleared from NVS and discovery restarted");
+    }
+    return errorResponse("Clear topology callback not set");
   }
 
   // Unknown command

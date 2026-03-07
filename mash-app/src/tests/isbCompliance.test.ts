@@ -125,18 +125,13 @@ describe('ISB Biomechanics Compliance', () => {
          * - Inversion: 0° to 35° (combined with subtalar)
          * - Eversion: 0° to -15°
          */
-        it('should define physiologically valid ankle dorsi/plantarflexion range', () => {
-            // Check if ankle joints are defined
-            const ankle = JOINT_DEFINITIONS.foot_l || JOINT_DEFINITIONS.ankle_l;
+        it.skipIf(!JOINT_DEFINITIONS.foot_l && !JOINT_DEFINITIONS.ankle_l)(
+            'should define physiologically valid ankle dorsi/plantarflexion range', () => {
+            const ankle = (JOINT_DEFINITIONS.foot_l || JOINT_DEFINITIONS.ankle_l)!;
 
-            if (ankle) {
-                // Should allow walking gait (~10° dorsi, ~15° plantar)
-                expect(ankle.flexionRange[0]).toBeLessThanOrEqual(-30); // Plantarflexion
-                expect(ankle.flexionRange[1]).toBeGreaterThanOrEqual(15); // Dorsiflexion
-            } else {
-                // If not defined, skip with warning
-                console.warn('Ankle joint not found in JOINT_DEFINITIONS - skipping');
-            }
+            // Should allow walking gait (~10° dorsi, ~15° plantar)
+            expect(ankle.flexionRange[0]).toBeLessThanOrEqual(-30); // Plantarflexion
+            expect(ankle.flexionRange[1]).toBeGreaterThanOrEqual(15); // Dorsiflexion
         });
     });
 

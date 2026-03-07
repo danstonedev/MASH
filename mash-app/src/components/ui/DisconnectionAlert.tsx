@@ -8,6 +8,10 @@ import { unifiedCalibration } from "../../calibration/UnifiedCalibration";
 import { useRecordingStore } from "../../store/useRecordingStore";
 import { useCalibrationStore } from "../../store/useCalibrationStore";
 import { useTareStore } from "../../store/useTareStore";
+import { useNetworkStore } from "../../store/useNetworkStore";
+import { parsePhysicalKey } from "../../lib/deviceKey";
+import { getConnectionIngestDiagnostics } from "../../store/useDeviceStore";
+import { shouldSuppressDisconnectAlertForIngestStorm } from "./disconnectionAlertGuards";
 
 /**
  * Global Disconnection Alert
@@ -21,6 +25,7 @@ export function DisconnectionAlert() {
   const lastDisconnectTime = useDeviceRegistry(
     (state) => state.lastDisconnectTime,
   );
+  const devices = useDeviceRegistry((state) => state.devices);
   const connect = useDeviceStore((state) => state.connect);
   const isScanning = useDeviceStore((state) => state.isScanning);
   const isRecording = useRecordingStore((state) => state.isRecording);
@@ -33,6 +38,9 @@ export function DisconnectionAlert() {
   const [reconnectBusy, setReconnectBusy] = useState(false);
   const [resumeAfterReconnect, setResumeAfterReconnect] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [impactMode, setImpactMode] = useState<
+    "setup" | "calibration" | "recording"
+  >("setup");
 
   const segmentLabel = useMemo(() => {
     if (!lastDisconnectedDeviceId) return "Sensor";
@@ -45,7 +53,90 @@ export function DisconnectionAlert() {
 
   useEffect(() => {
     if (lastDisconnectedDeviceId && lastDisconnectTime) {
-      if (Date.now() - lastDisconnectTime < 15000) {
+      const disconnectedDevice = devices.get(lastDisconnectedDeviceId);
+
+      // FALSE-POSITIVE GUARD #0:
+      // Only show disconnect modal for verified physical sensors that are
+      // currently known by topology. This suppresses ghost IDs like node_0_s0.
+      const parsed = parsePhysicalKey(lastDisconnectedDeviceId);
+      const topologySensorCount =
+        parsed && parsed.rawNodeId > 0
+          ? useNetworkStore
+              .getState()
+              .getNodeSensorCountByRawId(parsed.rawNodeId)
+          : undefined;
+      const hasVerifiedTopologyIdentity =
+        !!parsed &&
+        parsed.rawNodeId > 0 &&
+        typeof topologySensorCount === "number" &&
+        topologySensorCount > 0 &&
+        parsed.localSensorIndex >= 0 &&
+        parsed.localSensorIndex < topologySensorCount;
+      if (!hasVerifiedTopologyIdentity) {
+        console.info(
+          `[CONN:LIFECYCLE] Alert suppressed (guard#0): ${lastDisconnectedDeviceId} is not a verified topology sensor`,
+        );
+        setVisible(false);
+        return;
+      }
+
+      // FALSE-POSITIVE GUARD #1:
+      // If the same device key is already back to active/stale, suppress alert.
+      if (
+        disconnectedDevice &&
+        disconnectedDevice.connectionHealth !== "offline"
+      ) {
+        console.info(
+          `[CONN:LIFECYCLE] Alert suppressed (guard#1): ${lastDisconnectedDeviceId} already ${disconnectedDevice.connectionHealth}`,
+        );
+        setVisible(false);
+        return;
+      }
+
+      // FALSE-POSITIVE GUARD #2:
+      // If a device with the same physical identity (rawNodeId + localSensorIndex)
+      // is currently active/stale under a different key, suppress alert.
+      if (parsed) {
+        const hasEquivalentActiveDevice = Array.from(devices.values()).some(
+          (dev) =>
+            dev.id !== lastDisconnectedDeviceId &&
+            dev.rawNodeId === parsed.rawNodeId &&
+            dev.localSensorIndex === parsed.localSensorIndex &&
+            dev.connectionHealth !== "offline",
+        );
+        if (hasEquivalentActiveDevice) {
+          console.info(
+            `[CONN:LIFECYCLE] Alert suppressed (guard#2): ${lastDisconnectedDeviceId} has equivalent active device with same physical identity`,
+          );
+          setVisible(false);
+          return;
+        }
+      }
+
+      const now = Date.now();
+      const offlineCount = Array.from(devices.values()).filter(
+        (dev) => dev.connectionHealth === "offline",
+      ).length;
+      if (
+        shouldSuppressDisconnectAlertForIngestStorm({
+          now,
+          connected: useDeviceStore.getState().isConnected,
+          deviceCount: devices.size,
+          offlineCount,
+          ingest: getConnectionIngestDiagnostics(),
+        })
+      ) {
+        console.info(
+          `[CONN:LIFECYCLE] Alert suppressed (guard#3): ${lastDisconnectedDeviceId} is part of an ingest-wide rejection storm`,
+        );
+        setVisible(false);
+        return;
+      }
+
+      if (now - lastDisconnectTime < 15000) {
+        console.warn(
+          `[CONN:LIFECYCLE] ALERT SHOWN: ${lastDisconnectedDeviceId} disconnected (health=${disconnectedDevice?.connectionHealth ?? "unknown"})`,
+        );
         setVisible(true);
         setErrorMessage(null);
         setReconnectBusy(false);
@@ -59,6 +150,7 @@ export function DisconnectionAlert() {
           console.debug(
             "[DisconnectionAlert] Aborting calibration due to sensor loss",
           );
+          setImpactMode("calibration");
           unifiedCalibration.fail(
             `Sensor ${lastDisconnectedDeviceId} disconnected during calibration`,
           );
@@ -70,8 +162,16 @@ export function DisconnectionAlert() {
           );
           pauseRecording();
           setResumeAfterReconnect(true);
+          setImpactMode("recording");
         } else {
           setResumeAfterReconnect(false);
+          if (
+            calState.step === "idle" ||
+            calState.step === "complete" ||
+            calState.step === "error"
+          ) {
+            setImpactMode("setup");
+          }
         }
       }
     }
@@ -80,6 +180,7 @@ export function DisconnectionAlert() {
     isRecording,
     lastDisconnectedDeviceId,
     lastDisconnectTime,
+    devices,
     pauseRecording,
   ]);
 
@@ -121,7 +222,18 @@ export function DisconnectionAlert() {
               {segmentLabel} Disconnected
             </h3>
             <p className="mt-1 text-sm text-text-secondary">
-              Recording is paused while we recover the hardware connection.
+              {impactMode === "recording"
+                ? "Recording is paused while we recover the hardware connection."
+                : impactMode === "calibration"
+                  ? "Calibration was interrupted because a required sensor went offline."
+                  : "Setup is blocked until this sensor reconnects or is reassigned."}
+            </p>
+            <p className="mt-1 text-xs text-text-muted">
+              {impactMode === "recording"
+                ? "Reconnect this sensor to resume the current capture safely."
+                : impactMode === "calibration"
+                  ? "Reconnect first, then restart calibration from a clean state."
+                  : "Reconnect the sensor before continuing assignment or calibration."}
             </p>
             <p className="mt-1 text-xs text-text-muted">
               Sensor ID:{" "}

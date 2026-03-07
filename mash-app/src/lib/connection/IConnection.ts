@@ -3,7 +3,7 @@ import type {
   IMUDataPacket,
   JSONPacket,
   NodeInfoPacket,
-} from "../ble/DeviceInterface";
+} from "../protocol/DeviceInterface";
 
 export type ConnectionStatus =
   | "disconnected"
@@ -19,10 +19,10 @@ export type ConnectionData =
   | JSONPacket;
 
 export interface IConnection {
-  type: "ble" | "serial";
+  type: "serial";
   status: ConnectionStatus;
 
-  connect(params?: any): Promise<void>;
+  connect(params?: unknown): Promise<void>;
   disconnect(): Promise<void>;
 
   // Callbacks
@@ -30,7 +30,7 @@ export interface IConnection {
   onStatus(callback: (status: ConnectionStatus) => void): void;
 
   // Commands
-  sendCommand(cmd: string, params?: any): Promise<void>;
+  sendCommand(cmd: string, params?: unknown): Promise<void>;
 
   getDeviceName?(): string | undefined;
 }

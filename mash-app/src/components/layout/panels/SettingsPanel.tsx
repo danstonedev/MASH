@@ -5,28 +5,21 @@
  * Streamlined settings using extracted card components.
  */
 
-import { useState } from "react";
 import {
   Settings,
   Cpu,
   BarChart2,
-  ChevronDown,
-  ChevronRight,
-  Network,
 } from "lucide-react";
 import { useDeviceStore } from "../../../store/useDeviceStore";
 import { ConnectionSettingsCard } from "../../settings/ConnectionSettingsCard";
 import { FirmwareUpdateCard } from "../../settings/FirmwareUpdateCard";
 import { QualityMetricsCard } from "../../ui/QualityMetricsCard";
-// NetworkTopology component removed — file no longer exists.
-// TODO: Re-add when bluetooth/NetworkTopology.tsx is restored.
 
 import { useDeviceRegistry } from "../../../store/useDeviceRegistry";
 
 export function SettingsPanel() {
   const { isConnected } = useDeviceStore();
   const { zuptThreshold, setZuptThreshold } = useDeviceRegistry();
-  const [topologyExpanded, setTopologyExpanded] = useState(false);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -42,33 +35,6 @@ export function SettingsPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Connection Settings */}
         <ConnectionSettingsCard />
-
-        {/* Network Topology - Collapsible */}
-        {isConnected && (
-          <div className="p-3 bg-bg-elevated rounded-lg space-y-3">
-            <button
-              onClick={() => setTopologyExpanded(!topologyExpanded)}
-              className="w-full flex items-center justify-between"
-            >
-              <div className="flex items-center gap-2">
-                <Network className="h-4 w-4 text-text-secondary" />
-                <span className="text-xs font-semibold text-text-secondary uppercase">
-                  Network Topology
-                </span>
-              </div>
-              {topologyExpanded ? (
-                <ChevronDown className="h-4 w-4 text-text-secondary" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-text-secondary" />
-              )}
-            </button>
-            {topologyExpanded && (
-              <div className="text-xs text-text-secondary italic">
-                Network topology view unavailable
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Data Quality Metrics */}
         {isConnected && (

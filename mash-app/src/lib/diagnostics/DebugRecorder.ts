@@ -4,7 +4,6 @@
  * Records all pipeline health metrics over time:
  * - Sample rates (per-sensor Hz, packet Hz)
  * - CRC/corruption statistics
- * - V3 compression ratios
  * - Visualization performance
  * - Network topology events
  * - Sync quality metrics
@@ -54,13 +53,6 @@ export interface DebugSnapshot {
     totalPassed: number;
     totalFailed: number;
     totalFailRate: number;
-  };
-
-  // V3 Compression Stats
-  compression: {
-    keyframeCount: number;
-    deltaCount: number;
-    compressionRatio: number;
   };
 
   // Visualization Performance
@@ -122,11 +114,6 @@ export interface DebugRecordingSummary {
   totalCRCFailed: number;
   overallCRCFailRate: number;
   maxCRCFailRate: number;
-
-  // Compression Summary
-  avgCompressionRatio: number;
-  totalKeyframes: number;
-  totalDeltas: number;
 
   // Visualization Summary
   avgActualFPS: number;
@@ -276,7 +263,10 @@ class DebugRecorder {
 
     return {
       id: this.recordingId || `debug_${this.startTime}`,
-      startTime: this.startTime > 0 ? new Date(this.startTime).toISOString() : new Date().toISOString(),
+      startTime:
+        this.startTime > 0
+          ? new Date(this.startTime).toISOString()
+          : new Date().toISOString(),
       endTime: this.isRecording ? undefined : new Date(now).toISOString(),
       duration,
       sampleIntervalMs: this.sampleIntervalMs,
@@ -360,11 +350,6 @@ class DebugRecorder {
         totalFailRate:
           totalCRCChecks > 0 ? (crcTotals.failed / totalCRCChecks) * 100 : 0,
       },
-      compression: {
-        keyframeCount: sampleStats.v3KeyframeCount,
-        deltaCount: sampleStats.v3DeltaCount,
-        compressionRatio: sampleStats.v3CompressionRatio,
-      },
       visualization: {
         targetFPS: vizStats.targetFPS,
         actualFPS: vizStats.actualFPS,
@@ -396,9 +381,6 @@ class DebugRecorder {
 
     const rates = this.snapshots.map((s) => s.sampleRate.syncedHz);
     const crcRates = this.snapshots.map((s) => s.integrity.windowFailRate);
-    const compressionRatios = this.snapshots.map(
-      (s) => s.compression.compressionRatio,
-    );
     const actualFPS = this.snapshots.map((s) => s.visualization.actualFPS);
     const budgetUsage = this.snapshots.map((s) => s.visualization.budgetUsage);
 
@@ -418,16 +400,6 @@ class DebugRecorder {
     // CRC totals from last snapshot
     const lastSnapshot = this.snapshots[this.snapshots.length - 1];
 
-    // Compression totals
-    const totalKeyframes = this.snapshots.reduce(
-      (sum, s) => sum + s.compression.keyframeCount,
-      0,
-    );
-    const totalDeltas = this.snapshots.reduce(
-      (sum, s) => sum + s.compression.deltaCount,
-      0,
-    );
-
     return {
       avgSampleRate,
       minSampleRate,
@@ -438,10 +410,6 @@ class DebugRecorder {
       totalCRCFailed: lastSnapshot.integrity.totalFailed,
       overallCRCFailRate: lastSnapshot.integrity.totalFailRate,
       maxCRCFailRate: Math.max(...crcRates),
-      avgCompressionRatio:
-        compressionRatios.reduce((a, b) => a + b, 0) / compressionRatios.length,
-      totalKeyframes,
-      totalDeltas,
       avgActualFPS: actualFPS.reduce((a, b) => a + b, 0) / actualFPS.length,
       minActualFPS: Math.min(...actualFPS.filter((f) => f > 0)),
       avgBudgetUsage:
@@ -481,9 +449,6 @@ class DebugRecorder {
       totalCRCFailed: 0,
       overallCRCFailRate: 0,
       maxCRCFailRate: 0,
-      avgCompressionRatio: 0,
-      totalKeyframes: 0,
-      totalDeltas: 0,
       avgActualFPS: 0,
       minActualFPS: 0,
       avgBudgetUsage: 0,
@@ -501,17 +466,38 @@ class DebugRecorder {
 /**
  * Export recording to JSON file (triggers download)
  */
-export function exportRecordingToJSON(
+export async function exportRecordingToJSON(
   recording: DebugRecording,
   filename?: string,
-): void {
-  const json = JSON.stringify(recording, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
+): Promise<void> {
+  // Use minified JSON and gzip when supported to keep capture files practical.
+  const json = JSON.stringify(recording);
+  let blob = new Blob([json], { type: "application/json" });
+  let downloadName = filename || `${recording.id}.json`;
+
+  if (typeof CompressionStream !== "undefined") {
+    try {
+      const source = new Blob([json], { type: "application/json" }).stream();
+      const compressedStream = source.pipeThrough(
+        new CompressionStream("gzip"),
+      );
+      blob = await new Response(compressedStream).blob();
+      downloadName = downloadName.endsWith(".gz")
+        ? downloadName
+        : `${downloadName}.gz`;
+    } catch (error) {
+      console.warn(
+        "[DebugRecorder] Gzip compression failed, exporting plain JSON:",
+        error,
+      );
+    }
+  }
+
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename || `${recording.id}.json`;
+  a.download = downloadName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

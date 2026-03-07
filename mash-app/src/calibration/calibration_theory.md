@@ -68,7 +68,7 @@ Euler angles (Yaw, Pitch, Roll) suffer from **Gimbal Lock**: when two axes align
 *   They interpolate smoothly (SLERP).
 *   They handle "upside down" or "90 degrees" without mathematical singularities.
 
-In our system, **every single step**—from the raw firmware data, through the Bluetooth packet, to the React state, into the Three.js scene—remains a Quaternion. We **never** convert to Euler angles for processing, only for human-readable logs. This guarantees the system is immune to Gimbal Lock.
+In our system, **every single step**—from the raw firmware data, through the serial packet, to the React state, into the Three.js scene—remains a Quaternion. We **never** convert to Euler angles for processing, only for human-readable logs. This guarantees the system is immune to Gimbal Lock.
 
 ---
 
@@ -76,7 +76,7 @@ In our system, **every single step**—from the raw firmware data, through the B
 
 Once calibrated, the runtime loop is efficient and robust:
 
-1.  **Input:** Receive $q_{sensor\_raw}$ from Bluetooth (High frequency, 60-100Hz).
+1.  **Input:** Receive $q_{sensor\_raw}$ from ESP-NOW via Gateway Serial (High frequency, 60-100Hz).
 2.  **Tare/Calibration:** Apply the calculated offset:
     $$q_{bone} = q_{sensor\_raw} \otimes q_{mounting}$$
 3.  **Skeleton Update:** Update the Virtual Bone with $q_{bone}$.

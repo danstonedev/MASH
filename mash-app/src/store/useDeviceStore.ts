@@ -7,10 +7,11 @@ import { useNetworkStore } from "./useNetworkStore";
 import type {
   IMUDataPacket,
   EnvironmentalDataPacket,
-} from "../lib/ble/DeviceInterface";
+  JSONPacket,
+  NodeInfoPacket,
+} from "../lib/protocol/DeviceInterface";
 import { useFirmwareStore } from "./useFirmwareStore";
 import { useOptionalSensorsStore } from "./useOptionalSensorsStore";
-import type { ConnectionType } from "../lib/connection/ConnectionManager";
 import { liveGapFill } from "../analysis/LiveGapFill";
 import { makeDeviceKey } from "../lib/deviceKey";
 
@@ -24,6 +25,7 @@ import {
   getParserDropCounts,
   resetParserDropCounts,
 } from "../lib/connection/IMUParser";
+import { evaluateNetworkFrameCompleteness } from "../lib/connection/networkFrameCompleteness";
 
 import { ActivityEngine } from "../lib/analysis/ActivityEngine";
 import { useSensorAssignmentStore } from "./useSensorAssignmentStore";
@@ -47,9 +49,8 @@ interface DeviceState {
   battery: number;
   packetRate: number; // Hz
   lastKnownDevice: string | null; // Persisted for reconnection UX
-  connectionType: ConnectionType;
 
-  // Connection Settings (BLE or USB Serial - WiFi removed)
+  // Connection Settings (USB Serial via Gateway)
   wifiIP: string | null; // Gateway's WiFi IP when connected (for OTA updates)
 
   // Sync Readiness Verification
@@ -64,13 +65,25 @@ interface DeviceState {
   // Actions
   connect: () => Promise<void>;
   disconnect: () => void;
-  sendCommand: (cmd: string, params?: any) => void;
+  sendCommand: (cmd: string, params?: unknown) => void;
   setWifiIP: (ip: string | null) => void;
-  setConnectionType: (type: ConnectionType) => void;
   pollSyncStatus: () => Promise<void>;
   acceptNode: (nodeId: number) => void;
   rejectNode: (nodeId: number) => void;
   acceptAllPendingNodes: () => void;
+}
+
+const connectionIngestDiagnostics = {
+  rawImuPacketCount: 0,
+  acceptedImuPacketCount: 0,
+  lastRawImuAt: 0,
+  lastAcceptedImuAt: 0,
+  lastPacketCompletenessRejectAt: 0,
+  lastNetworkCompletenessRejectAt: 0,
+};
+
+export function getConnectionIngestDiagnostics() {
+  return { ...connectionIngestDiagnostics };
 }
 
 // We keep the high-frequency packet data outside the reactive store
@@ -83,11 +96,55 @@ export const latestPacketRef = { current: null as IMUDataPacket | null };
 let _pruneTimerId: ReturnType<typeof setInterval> | null = null;
 const SENSOR_TOPOLOGY_WARMUP_MS = 5000;
 
-export const useDeviceStore = create<DeviceState>((set, get) => {
-  const savedConnectionType =
-    (localStorage.getItem("imu-connect-connection-type") as ConnectionType) ||
-    "serial";
+type FirmwareJsonPacket = JSONPacket & { type: string };
 
+interface SyncStatusJsonPacket extends FirmwareJsonPacket {
+  type: "sync_status";
+  discoveryLocked?: boolean;
+  pendingNodeCount?: number;
+}
+
+interface PendingNodeJson {
+  nodeId?: number;
+  name?: string;
+  sensorCount?: number;
+  hasMag?: boolean;
+  hasBaro?: boolean;
+  mac?: string;
+}
+
+interface PendingNodesJsonPacket extends FirmwareJsonPacket {
+  type: "pending_nodes";
+  nodes: PendingNodeJson[];
+}
+
+function isFirmwareJsonPacket(packet: unknown): packet is FirmwareJsonPacket {
+  return (
+    !!packet &&
+    typeof packet === "object" &&
+    "type" in packet &&
+    typeof (packet as { type?: unknown }).type === "string"
+  );
+}
+
+function formatResetReasonLabel(reason: number): string {
+  const labels: Record<number, string> = {
+    1: "POWERON",
+    3: "SW",
+    5: "DEEPSLEEP",
+    7: "TASK_WDT",
+    8: "WDT",
+    9: "SDIO",
+    12: "SW_CPU",
+    13: "INT_WDT",
+    14: "PANIC",
+    15: "BROWNOUT",
+  };
+
+  return labels[reason] ?? `RESET_${reason}`;
+}
+
+export const useDeviceStore = create<DeviceState>((set, get) => {
   // Periodic maintenance: prune stale devices/nodes to prevent ghost entries.
   if (_pruneTimerId !== null) clearInterval(_pruneTimerId);
   _pruneTimerId = setInterval(() => {
@@ -101,7 +158,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
   // Note: We bind to the manager which handles routing
   connectionManager.onStatus((status) => {
     const isConnected = status === "connected";
-    const { success, error, warning } = useNotificationStore.getState();
+    const { success, error } = useNotificationStore.getState();
     const activeType = connectionManager.getActiveType();
 
     // Check if connected device is a Gateway
@@ -116,7 +173,14 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       firstAcceptedImuLogged = false;
       rawImuPacketCount = 0;
       acceptedImuPacketCount = 0;
+      connectionIngestDiagnostics.rawImuPacketCount = 0;
+      connectionIngestDiagnostics.acceptedImuPacketCount = 0;
+      connectionIngestDiagnostics.lastRawImuAt = 0;
+      connectionIngestDiagnostics.lastAcceptedImuAt = 0;
+      connectionIngestDiagnostics.lastPacketCompletenessRejectAt = 0;
+      connectionIngestDiagnostics.lastNetworkCompletenessRejectAt = 0;
       lastSyncDiagLogMs = 0;
+      lastReconcileLogMs = 0;
       lastNoDataWarnMs = 0;
       lastRangeDiagLogMs = 0;
       lastPendingNodesRequestMs = 0;
@@ -129,10 +193,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       // Fresh session baseline: clear stale topology/device state from previous runs.
       useDeviceRegistry.getState().clear();
       useNetworkStore.getState().reset();
-
-      console.debug(
-        `Device Store: Connected to ${deviceName} via ${activeType.toUpperCase()}`,
-      );
 
       // Persist device name for reconnection UX
       if (deviceName) {
@@ -161,9 +221,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       setTimeout(async () => {
         // Guard: abort if we disconnected during the delay
         if (!get().isConnected) {
-          console.debug(
-            "[DeviceStore] Init sequence aborted — disconnected during startup delay",
-          );
           return;
         }
 
@@ -185,13 +242,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
               );
           }
 
-          // CRITICAL: Reset calibration on every connection
-          // User must recalibrate after connect/reconnect
-          // const { useCalibrationStore } = await import('./useCalibrationStore');
-          // useCalibrationStore.getState().reset();
-          // console.log('[DeviceStore] Calibration reset on connection');
-
-          console.debug("Requesting Device Status...");
           await connectionManager.sendCommand("GET_STATUS");
 
           // Guard: abort if disconnected mid-sequence
@@ -227,9 +277,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
           // completes, nodes register, and data flows before declaring ready.
           // The UI can show phase progress (discovering → syncing → ready).
           // ================================================================
-          console.debug(
-            "[SyncReadiness] Starting pre-streaming verification...",
-          );
           set({ syncPhase: "connecting", syncReady: false });
           setTimeout(() => {
             if (get().isConnected && !firstAcceptedImuLogged) {
@@ -265,24 +312,17 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
                 .sendCommand("LOCK_DISCOVERY")
                 .then(() => {
                   set({ discoveryLocked: true });
-                  console.debug(
-                    "[DeviceStore] Discovery locked after sync_status ready",
-                  );
                 })
                 .catch((e) =>
                   console.warn("[DeviceStore] LOCK_DISCOVERY failed:", e),
                 );
-            } else {
-              console.debug(
-                "[DeviceStore] Ready via fallback — deferring LOCK_DISCOVERY until sync_status confirms",
-              );
             }
 
             success(
               "System Ready",
-              `${finalState.nodeCount} node(s), ${detectedSensors} sensor(s), sync rate: ${finalState.syncBuffer.trueSyncRate.toFixed(0)}%`,
+              `${finalState.nodeCount} node(s), ${detectedSensors} sensor(s), transport sync: ${finalState.syncBuffer.transportSyncRate.toFixed(0)}%`,
             );
-          } catch (readinessErr: any) {
+          } catch (readinessErr: unknown) {
             // Guard: don't show warnings if we disconnected during verification
             if (!get().isConnected) return;
 
@@ -373,6 +413,13 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       }
     }
 
+    if (!isConnected) {
+      connectionIngestDiagnostics.lastRawImuAt = 0;
+      connectionIngestDiagnostics.lastAcceptedImuAt = 0;
+      connectionIngestDiagnostics.lastPacketCompletenessRejectAt = 0;
+      connectionIngestDiagnostics.lastNetworkCompletenessRejectAt = 0;
+    }
+
     set({ isConnected, isScanning: status === "connecting", isGateway });
   });
 
@@ -383,8 +430,10 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
   let connectStartedAtMs = 0;
   let firstAcceptedImuLogged = false;
   let lastSyncDiagLogMs = 0;
+  let lastReconcileLogMs = 0;
   let lastNoDataWarnMs = 0;
   let lastRangeDiagLogMs = 0;
+  let lastNetworkCompletenessLogMs = 0;
   let lastPendingNodesRequestMs = 0;
   let readySourceSyncCount = 0;
   let readySourceFallbackCount = 0;
@@ -434,6 +483,17 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
     return parts.length > 0 ? parts.join(", ") : "none";
   };
 
+  const getTopologyExpectedSensorCount = (): number => {
+    const nodes = Array.from(useNetworkStore.getState().nodes.values());
+    return nodes.reduce((sum, node) => {
+      const count =
+        typeof node.sensorCount === "number" && node.sensorCount > 0
+          ? node.sensorCount
+          : node.sensors.size;
+      return sum + Math.max(0, count);
+    }, 0);
+  };
+
   const maybeLogRangeDiagnostics = (reason: string): void => {
     const now = Date.now();
     if (now - lastRangeDiagLogMs < 2000) return;
@@ -475,11 +535,11 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
         ? connectionManager.getSerial().getDebugStats()
         : null;
     const serialMsg = serialStats
-      ? ` serial={chunks:${serialStats.chunks},bytes:${serialStats.chunkBytes},frames:${serialStats.framesExtracted},pkts:${serialStats.packetsDispatched},ring:${serialStats.ringLength},wring:${serialStats.workerRingLength},pending:${serialStats.pendingFrames},reader:${serialStats.hasReader ? 1 : 0},writer:${serialStats.hasWriter ? 1 : 0},flowPaused:${serialStats.flowPaused ? 1 : 0},ascii:\"${serialStats.lastAsciiPreview || ""}\"}`
+      ? ` serial={chunks:${serialStats.chunks},bytes:${serialStats.chunkBytes},frames:${serialStats.framesExtracted},pkts:${serialStats.packetsDispatched},ring:${serialStats.ringLength},wring:${serialStats.workerRingLength},pending:${serialStats.pendingFrames},reader:${serialStats.hasReader ? 1 : 0},writer:${serialStats.hasWriter ? 1 : 0},flowPaused:${serialStats.flowPaused ? 1 : 0},ascii:"${serialStats.lastAsciiPreview || ""}"}`
       : "";
 
     console.info(
-      `[ConnDiag:${tag}] connected=${storeState.isConnected} type=${connectionManager.getActiveType()} phase=${storeState.syncPhase} tdma=${syncState.tdmaState} nodes=${syncState.nodeCount} alive=${aliveNodes}/${syncState.nodeCount} expectedSensors=${syncState.syncBuffer.expectedSensors} trueSync=${syncState.syncBuffer.trueSyncRate.toFixed(1)}% ready=${syncState.ready} readySrc=${syncState.readySource} readySrcCount={sync:${readySourceSyncCount},fallback:${readySourceFallbackCount}} imuRaw=${rawImuPacketCount} imuAccepted=${acceptedImuPacketCount} drops={quat:${parserDrops.quatMag},invalid:${parserDrops.invalid},untrusted:${parserDrops.untrusted},corrupt:${parserDrops.corruptFrame}} ranges=[${getNodeRangesSummary()}] reasons=${syncState.failureReasons.slice(0, 2).join(" | ") || "none"}${serialMsg}`,
+      `[ConnDiag:${tag}] connected=${storeState.isConnected} type=${connectionManager.getActiveType()} phase=${storeState.syncPhase} tdma=${syncState.tdmaState} nodes=${syncState.nodeCount} alive=${aliveNodes}/${syncState.nodeCount} expectedSensors=${syncState.syncBuffer.expectedSensors} transportSync=${syncState.syncBuffer.transportSyncRate.toFixed(1)}% strictSync=${syncState.syncBuffer.strictTrueSyncRate.toFixed(1)}% ready=${syncState.ready} readySrc=${syncState.readySource} readySrcCount={sync:${readySourceSyncCount},fallback:${readySourceFallbackCount}} imuRaw=${rawImuPacketCount} imuAccepted=${acceptedImuPacketCount} drops={invalid:${parserDrops.invalid},ghostIdentity:${parserDrops.ghostIdentity},untrusted:${parserDrops.untrusted},corrupt:${parserDrops.corruptFrame}} ranges=[${getNodeRangesSummary()}] reasons=${syncState.failureReasons.slice(0, 2).join(" | ") || "none"}${serialMsg}`,
     );
   };
 
@@ -519,9 +579,11 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
     // Forward to Registry for 3D Model updates
     packets.forEach((packet) => {
       if ("quaternion" in packet) {
-        // IMU Packet (now includes deviceId from BLEConnection)
+        // IMU Packet (from SerialConnection via Gateway)
         const imuPacket = packet as IMUDataPacket & { deviceId?: string };
         rawImuPacketCount++;
+        connectionIngestDiagnostics.rawImuPacketCount = rawImuPacketCount;
+        connectionIngestDiagnostics.lastRawImuAt = Date.now();
 
         // Guard: ignore malformed IMU-shaped packets without a valid sensorId.
         // These can appear during brief serial corruption and must not be
@@ -537,6 +599,64 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
           return;
         }
 
+        // Reject sync frames that are incomplete either at the packet level or,
+        // once topology is authoritative, relative to the full network.
+        if (imuPacket.frameCompleteness) {
+          const authoritativeExpectedCount =
+            imuPacket.frameCompleteness.authoritativeExpectedCount ??
+            get().syncState?.syncBuffer.authoritativeExpectedSensors ??
+            get().syncState?.syncBuffer.expectedSensors;
+          const activeStreamingCount =
+            imuPacket.frameCompleteness.activeStreamingCount ??
+            get().syncState?.syncBuffer.activeStreamingSensors;
+          imuPacket.frameCompleteness = {
+            ...imuPacket.frameCompleteness,
+            authoritativeExpectedCount,
+            activeStreamingCount,
+          };
+
+          const completenessDecision = evaluateNetworkFrameCompleteness({
+            validCount: imuPacket.frameCompleteness.validCount,
+            packetExpectedCount: imuPacket.frameCompleteness.expectedCount,
+            syncExpectedSensors: authoritativeExpectedCount,
+            topologyExpectedSensors: getTopologyExpectedSensorCount(),
+            discoveryLocked: get().discoveryLocked,
+          });
+
+          if (completenessDecision.reject) {
+            const now = Date.now();
+            if (completenessDecision.networkIsIncomplete) {
+              connectionIngestDiagnostics.lastNetworkCompletenessRejectAt = now;
+            } else {
+              connectionIngestDiagnostics.lastPacketCompletenessRejectAt = now;
+            }
+            if (now - lastNetworkCompletenessLogMs > 2000) {
+              lastNetworkCompletenessLogMs = now;
+              console.warn(
+                `[ConnDiag] Rejecting network-incomplete frame sensor=${imuPacket.sensorId} frame=${imuPacket.frameNumber} valid=${imuPacket.frameCompleteness.validCount} packetExpected=${imuPacket.frameCompleteness.expectedCount} authoritativeExpected=${completenessDecision.authoritativeExpectedCount} activeStreaming=${get().syncState?.syncBuffer.activeStreamingSensors ?? 0} locked=${get().discoveryLocked} readySrc=${get().syncState?.readySource ?? "none"}`,
+              );
+              logConnectionSnapshot(
+                completenessDecision.networkIsIncomplete
+                  ? "network-incomplete-frame"
+                  : "packet-incomplete-frame",
+              );
+            }
+            return;
+          }
+
+          if (completenessDecision.networkIsIncomplete) {
+            const now = Date.now();
+            connectionIngestDiagnostics.lastNetworkCompletenessRejectAt = now;
+            if (now - lastNetworkCompletenessLogMs > 2000) {
+              lastNetworkCompletenessLogMs = now;
+              console.info(
+                `[ConnDiag] Accepting packet-local sync frame sensor=${imuPacket.sensorId} frame=${imuPacket.frameNumber} valid=${imuPacket.frameCompleteness.validCount} packetExpected=${imuPacket.frameCompleteness.expectedCount} authoritativeExpected=${completenessDecision.authoritativeExpectedCount} activeStreaming=${get().syncState?.syncBuffer.activeStreamingSensors ?? 0} locked=${get().discoveryLocked} readySrc=${get().syncState?.readySource ?? "none"}`,
+              );
+              logConnectionSnapshot("packet-local-sync-frame");
+            }
+          }
+        }
+
         observedSensorIds.add(imuPacket.sensorId);
 
         // Guard: when nodes are discovered, only accept IDs in their announced ranges.
@@ -547,10 +667,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
         if (!expected) {
           const now = Date.now();
           const discoveryLocked = get().discoveryLocked;
-          const plausibleNewSensor =
-            Number.isInteger(imuPacket.sensorId) &&
-            imuPacket.sensorId >= 0 &&
-            imuPacket.sensorId <= 255;
           const inTopologyWarmup =
             connectStartedAtMs > 0 &&
             now - connectStartedAtMs < SENSOR_TOPOLOGY_WARMUP_MS;
@@ -567,7 +683,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
               );
             } else {
               console.info(
-                `[DeviceStore] Provisional allow for sensorId=${imuPacket.sensorId} while discovery is unlocked`,
+                `[DeviceStore] Blocking unexpected sensorId=${imuPacket.sensorId} while discovery is unlocked`,
               );
             }
           }
@@ -586,14 +702,10 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
 
           if (!inTopologyWarmup) {
             blockedSensorIds.add(imuPacket.sensorId);
-          }
-
-          if (!inTopologyWarmup && discoveryLocked) {
+            // Strict post-warmup policy: reject any sensor outside known ranges.
+            // Legit new sensors must first arrive through discovery/sync_status,
+            // which updates allowed ranges before IMU packets are accepted.
             requestPendingNodesSnapshot(imuPacket.sensorId);
-            return;
-          }
-
-          if (!inTopologyWarmup && !plausibleNewSensor) {
             return;
           }
 
@@ -611,6 +723,9 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
           }
         }
         acceptedImuPacketCount++;
+        connectionIngestDiagnostics.acceptedImuPacketCount =
+          acceptedImuPacketCount;
+        connectionIngestDiagnostics.lastAcceptedImuAt = Date.now();
         syncReadiness.noteAcceptedImuPacket(imuPacket.sensorId);
         if (!firstAcceptedImuLogged) {
           firstAcceptedImuLogged = true;
@@ -649,7 +764,10 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
 
           // ALWAYS record at full 200Hz (research-grade recording)
           // MOVED AFTER handleRealDeviceData to capture the FUSED quaternion!
-          useRecordingStore.getState().recordFrame(processedPacket);
+          // NEVER record synthetic gap-filled frames — only real hardware data.
+          if (!(filledImuPacket as any).__filled) {
+            useRecordingStore.getState().recordFrame(processedPacket);
+          }
 
           // ALWAYS push to ActivityEngine (needs full rate, and benefits from fused data)
           ActivityEngine.push(processedPacket);
@@ -662,17 +780,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
             // DEBUG: Log unique sensor IDs (throttled to every 5s)
             if (pkt.sensorId !== undefined) {
               seenSensorIds.add(pkt.sensorId);
-              const now = Date.now();
-              if (now - lastSensorLog > 5000) {
-                console.debug(
-                  `[DeviceStore] Unique sensors seen: [${Array.from(
-                    seenSensorIds,
-                  )
-                    .sort((a, b) => a - b)
-                    .join(", ")}]`,
-                );
-                lastSensorLog = now;
-              }
             }
 
             // PHASE-1: Use physical identity key (consistent with SerialConnection)
@@ -691,11 +798,14 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
             // Update network topology store (throttled to ~10Hz to reduce set() overhead)
             const networkThrottleKey = `_netThrottle_${pkt.sensorId ?? 0}`;
             const netNow = Date.now();
+            const throttleState = globalThis as typeof globalThis &
+              Record<string, unknown>;
+            const lastThrottleAt = throttleState[networkThrottleKey];
             if (
-              !(window as any)[networkThrottleKey] ||
-              netNow - (window as any)[networkThrottleKey] >= 100
+              typeof lastThrottleAt !== "number" ||
+              netNow - lastThrottleAt >= 100
             ) {
-              (window as any)[networkThrottleKey] = netNow;
+              throttleState[networkThrottleKey] = netNow;
               const device = useDeviceRegistry
                 .getState()
                 .devices.get(deviceKey);
@@ -724,7 +834,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
         useRecordingStore.getState().recordEnvFrame(env);
       } else if ("nodeName" in packet) {
         // Node Info / Discovery Packet
-        const info = packet as any; // Cast to NodeInfoPacket
+        const info = packet as NodeInfoPacket;
         useNetworkStore
           .getState()
           .registerNode(
@@ -734,18 +844,14 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
             info.hasBarometer,
             info.hasMagnetometer,
           );
-      } else if (
-        packet &&
-        typeof packet === "object" &&
-        "type" in packet &&
-        typeof (packet as any).type === "string"
-      ) {
+      } else if (isFirmwareJsonPacket(packet)) {
         // Firmware JSON packet (GET_STATUS / GET_VERSION / calibration progress, etc.)
-        const json = packet as any;
+        const json = packet;
 
         if (json.type === "sync_status") {
           try {
-            syncReadiness.handleSyncStatusResponse(json);
+            const syncStatus = json as SyncStatusJsonPacket;
+            syncReadiness.handleSyncStatusResponse(syncStatus);
             const st = syncReadiness.state;
             set({ syncPhase: st.phase, syncReady: st.ready, syncState: st });
             trackReadySource(st);
@@ -766,10 +872,9 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
 
                 // Prefer compact base (matches 0x25 SyncFrame sensor IDs)
                 // Fallback to raw nodeId for pre-TDMA or legacy firmware
-                const effectiveId =
-                  Number.isFinite(node.compactBase) && node.compactBase > 0
-                    ? node.compactBase
-                    : node.nodeId;
+                const compactBase =
+                  typeof node.compactBase === "number" ? node.compactBase : 0;
+                const effectiveId = compactBase > 0 ? compactBase : node.nodeId;
 
                 networkStore.registerNode(
                   effectiveId,
@@ -789,6 +894,44 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
               }
             }
 
+            // SWOT-O6: Topology reconciliation — compare gateway vs webapp view.
+            // Throttled to once per 5s to avoid log spam. Detects divergence
+            // where webapp shows devices the gateway doesn't know about, or
+            // gateway has nodes the webapp hasn't registered.
+            if (Array.isArray(st.nodes)) {
+              const now = Date.now();
+              if (now - lastReconcileLogMs > 5000) {
+                lastReconcileLogMs = now;
+                const networkStore = useNetworkStore.getState();
+                const gatewayNodeIds = new Set(
+                  st.nodes
+                    .filter(
+                      (node) =>
+                        node.alive &&
+                        typeof node.compactBase === "number" &&
+                        node.compactBase > 0,
+                    )
+                    .map((node) => node.compactBase as number),
+                );
+                const webappNodeIds = new Set(
+                  Array.from(networkStore.nodes.keys()),
+                );
+
+                const gatewayOnly = [...gatewayNodeIds].filter(
+                  (id) => !webappNodeIds.has(id),
+                );
+                const webappOnly = [...webappNodeIds].filter(
+                  (id) => !gatewayNodeIds.has(id),
+                );
+
+                if (gatewayOnly.length > 0 || webappOnly.length > 0) {
+                  console.warn(
+                    `[CONN:RECONCILE] Topology mismatch! gateway-only=[${gatewayOnly.join(",")}] webapp-only=[${webappOnly.join(",")}] (gateway nodes=${gatewayNodeIds.size}, webapp nodes=${webappNodeIds.size})`,
+                  );
+                }
+              }
+            }
+
             if (
               st.ready &&
               st.readySource === "sync_status" &&
@@ -798,9 +941,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
                 .sendCommand("LOCK_DISCOVERY")
                 .then(() => {
                   set({ discoveryLocked: true });
-                  console.debug(
-                    "[DeviceStore] Discovery locked on sync_status confirmation",
-                  );
                 })
                 .catch((e) =>
                   console.warn("[DeviceStore] LOCK_DISCOVERY failed:", e),
@@ -817,7 +957,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
               lastSyncDiagLogMs = now;
               const aliveNodes = st.nodes.filter((n) => n.alive).length;
               console.info(
-                `[SyncDiag] phase=${st.phase} tdma=${st.tdmaState} nodes=${st.nodeCount} alive=${aliveNodes}/${st.nodeCount} expectedSensors=${st.syncBuffer.expectedSensors} trueSync=${st.syncBuffer.trueSyncRate.toFixed(1)}% ready=${st.ready} locked=${json.discoveryLocked ?? "?"} pending=${json.pendingNodeCount ?? 0} reasons=${st.failureReasons.slice(0, 2).join(" | ") || "none"}`,
+                `[SyncDiag] phase=${st.phase} tdma=${st.tdmaState} nodes=${st.nodeCount} alive=${aliveNodes}/${st.nodeCount} expectedSensors=${st.syncBuffer.authoritativeExpectedSensors} activeStreaming=${st.syncBuffer.activeStreamingSensors} transportSync=${st.syncBuffer.transportSyncRate.toFixed(1)}% strictSync=${st.syncBuffer.strictTrueSyncRate.toFixed(1)}% ready=${st.ready} locked=${json.discoveryLocked ?? "?"} pending=${json.pendingNodeCount ?? 0} reasons=${st.failureReasons.slice(0, 2).join(" | ") || "none"}`,
               );
             }
           } catch (err) {
@@ -853,8 +993,9 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
         }
 
         if (json.type === "pending_nodes" && Array.isArray(json.nodes)) {
-          const incoming = json.nodes
-            .map((n: any) => ({
+          const pendingNodes = (json as PendingNodesJsonPacket).nodes;
+          const incoming = pendingNodes
+            .map((n) => ({
               nodeId: Number(n.nodeId ?? 0),
               name: String(n.name ?? `Node ${n.nodeId ?? "?"}`),
               sensorCount: Number(n.sensorCount ?? 0),
@@ -887,6 +1028,102 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
           if (typeof json.discoveryLocked === "boolean") {
             set({ discoveryLocked: json.discoveryLocked });
           }
+        }
+
+        // SWOT-O2: Handle node_pruned — gateway notifies us a node was removed
+        if (json.type === "node_pruned" && Number.isFinite(json.nodeId)) {
+          console.warn(
+            `[CONN:LIFECYCLE] GATEWAY PRUNED node ${json.nodeId} — firmware removed inactive node`,
+          );
+          // The sync_status that follows will update topology.
+          // Log for observability; the sync_status handler does the actual
+          // network store update.
+        }
+
+        // SWOT-O2: Handle node_registered — gateway notifies us a node joined
+        if (
+          json.type === "node_registered" &&
+          Number.isFinite(json.nodeId) &&
+          Number.isFinite(json.sensorCount)
+        ) {
+          const compactBase =
+            Number.isFinite(json.compactBase) && json.compactBase > 0
+              ? json.compactBase
+              : json.nodeId;
+          console.info(
+            `[CONN:LIFECYCLE] GATEWAY REGISTERED node ${json.nodeId} (sensors=${json.sensorCount}, compactBase=${compactBase})`,
+          );
+          // Immediately update network store — don't wait for next sync_status poll
+          useNetworkStore
+            .getState()
+            .registerNode(
+              compactBase,
+              json.name || `Node ${json.nodeId}`,
+              json.sensorCount,
+              !!json.hasBaro,
+              !!json.hasMag,
+              json.nodeId,
+            );
+        }
+
+        if (
+          json.type === "node_power_diag" &&
+          Number.isFinite(json.nodeId) &&
+          Number.isFinite(json.brownoutCount)
+        ) {
+          const reason = Number.isFinite(json.lastResetReason)
+            ? Number(json.lastResetReason)
+            : -1;
+          const brownouts = Number(json.brownoutCount);
+          const boots = Number.isFinite(json.bootCount)
+            ? Number(json.bootCount)
+            : -1;
+          const recovery = !!json.recoveryActive;
+
+          const reasonLabel = formatResetReasonLabel(reason);
+          console.warn(
+            `[CONN:POWER] node=${json.nodeId} boots=${boots} brownouts=${brownouts} last=${reasonLabel} recovery=${recovery}`,
+          );
+        }
+
+        if (
+          json.type === "node_tdma_diag" &&
+          Number.isFinite(json.nodeId) &&
+          Number.isFinite(json.intervalMs)
+        ) {
+          const intervalMs = Math.max(1, Number(json.intervalMs));
+          const txAttempts = Number.isFinite(json.txAttempts)
+            ? Number(json.txAttempts)
+            : 0;
+          const txSuccess = Number.isFinite(json.txSuccess)
+            ? Number(json.txSuccess)
+            : 0;
+          const txFail = Number.isFinite(json.txFail) ? Number(json.txFail) : 0;
+          const txStallClears = Number.isFinite(json.txStallClears)
+            ? Number(json.txStallClears)
+            : 0;
+          const staleIncompleteDrops = Number.isFinite(
+            json.staleIncompleteDrops,
+          )
+            ? Number(json.staleIncompleteDrops)
+            : 0;
+          const maxQueueDepth = Number.isFinite(json.maxQueueDepth)
+            ? Number(json.maxQueueDepth)
+            : 0;
+          const currentFrame = Number.isFinite(json.currentFrame)
+            ? Number(json.currentFrame)
+            : -1;
+          const successPct =
+            txAttempts > 0 ? (txSuccess / txAttempts) * 100 : 100;
+          const effectiveSensorHz = (txSuccess * 4 * 1000) / intervalMs;
+          const level =
+            txFail > 0 || txStallClears > 0 || staleIncompleteDrops > 0
+              ? console.warn
+              : console.info;
+
+          level(
+            `[CONN:TDMA] node=${json.nodeId} frame=${currentFrame} interval=${intervalMs}ms attempts=${txAttempts} success=${txSuccess} fail=${txFail} successPct=${successPct.toFixed(1)} sensorHz=${effectiveSensorHz.toFixed(1)} stalls=${txStallClears} staleDrops=${staleIncompleteDrops} qMax=${maxQueueDepth}`,
+          );
         }
 
         if (json.type === "flow" && typeof json.status === "string") {
@@ -961,7 +1198,6 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
     battery: 0,
     packetRate: 0,
     lastKnownDevice: localStorage.getItem("imu-connect-last-device"),
-    connectionType: savedConnectionType,
 
     wifiIP: null, // For OTA firmware updates only
 
@@ -978,19 +1214,13 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       set({ wifiIP: ip });
     },
 
-    setConnectionType: (type) => {
-      localStorage.setItem("imu-connect-connection-type", type);
-      set({ connectionType: type });
-    },
-
     connect: async () => {
-      const { error, warning } = useNotificationStore.getState();
+      const { error } = useNotificationStore.getState();
       set({ isScanning: true });
-      const connectionType = get().connectionType;
       let connectErr: unknown = null;
 
       try {
-        await connectionManager.connect(connectionType);
+        await connectionManager.connect();
         return;
       } catch (e) {
         connectErr = e;
@@ -1005,20 +1235,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       // User-friendly error messages
       if (errMsg.includes("cancelled") || errMsg.includes("canceled")) {
         // User cancelled - no notification needed
-      } else if (connectionType === "ble" && errMsg.includes("Bluetooth")) {
-        error(
-          "Bluetooth Error",
-          "Please ensure Bluetooth is enabled and the device is in range.",
-        );
-      } else if (
-        connectionType === "ble" &&
-        (errMsg.includes("not found") || errMsg.includes("NotFoundError"))
-      ) {
-        error(
-          "Device Not Found",
-          "No compatible IMU device found. Make sure it's powered on.",
-        );
-      } else if (connectionType === "serial") {
+      } else if (errMsg.includes("serial") || errMsg.includes("Serial")) {
         error("Serial Connection Failed", errMsg);
       } else {
         error("Connection Failed", errMsg || "Unable to connect to device.");
@@ -1031,7 +1248,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
       useDeviceRegistry.getState().clear();
     },
 
-    sendCommand: (cmd: string, params?: any) => {
+    sendCommand: (cmd: string, params?: unknown) => {
       connectionManager.sendCommand(cmd, params);
     },
 
@@ -1082,7 +1299,11 @@ export const useDeviceStore = create<DeviceState>((set, get) => {
 });
 
 if (typeof window !== "undefined") {
-  (window as any).__mashConnDiag = () => {
+  const debugWindow = window as Window & {
+    __mashConnDiag?: () => Record<string, unknown>;
+  };
+
+  debugWindow.__mashConnDiag = () => {
     const state = useDeviceStore.getState();
     const serialStats =
       connectionManager.getActiveType() === "serial"

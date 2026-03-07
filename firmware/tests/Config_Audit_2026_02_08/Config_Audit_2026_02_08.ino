@@ -32,7 +32,7 @@ static_assert(SYNC_MAX_SENSORS == 20,
               "CRITICAL-1: Expected SYNC_MAX_SENSORS == 20 after audit fix");
 
 // SyncFrame packet must fit in SYNC_FRAME_MAX_PACKET_SIZE
-static_assert(10 + SYNC_MAX_SENSORS * 24 <= SYNC_FRAME_MAX_PACKET_SIZE,
+static_assert(10 + SYNC_MAX_SENSORS * 16 <= SYNC_FRAME_MAX_PACKET_SIZE,
               "CRITICAL-1: Max SyncFrame exceeds SYNC_FRAME_MAX_PACKET_SIZE!");
 
 // ============================================================================
@@ -48,8 +48,8 @@ static_assert(10 + SYNC_MAX_SENSORS * 24 <= SYNC_FRAME_MAX_PACKET_SIZE,
 
 static_assert(DEFAULT_SAMPLE_RATE_HZ == 200,
               "CRITICAL-2 FAILED: Gateway DEFAULT_SAMPLE_RATE_HZ must be 200!");
-static_assert(MAX_SENSORS == 8,
-              "CRITICAL-3 FAILED: Gateway MAX_SENSORS must be 8!");
+static_assert(MAX_SENSORS == 4,
+              "CRITICAL-3 FAILED: Gateway MAX_SENSORS must be 4 (direct I2C: Wire@0x68/0x69 + Wire1@0x68/0x69)!");
 static_assert(MAX_NODES >= 4,
               "MAX_NODES must be >= 4 for 4-8 node configurations!");
 
@@ -57,13 +57,13 @@ static_assert(MAX_NODES >= 4,
 // CRITICAL-1 (continued): BLE_FRAME_BUFFER_SIZE must fit 20+sensors
 // ============================================================================
 // This is defined in MASH_Gateway.ino but we verify the math here:
-// Max SyncFrame: 10 header + 20 sensors × 24 bytes + 2 length prefix = 492 bytes
-// BLE_FRAME_BUFFER_SIZE must be >= 492
+// Max SyncFrame: 10 header + 20 sensors x 16 bytes + 2 length prefix = 332 bytes
+// BLE_FRAME_BUFFER_SIZE must be >= 332
 
-static constexpr size_t EXPECTED_MAX_SYNCFRAME_SIZE = 10 + 20 * 24 + 2; // = 492
-static_assert(EXPECTED_MAX_SYNCFRAME_SIZE == 492,
-              "Sanity check: max SyncFrame size should be 492 bytes");
-// Note: BLE_FRAME_BUFFER_SIZE is now 512, which is > 492 ✓
+static constexpr size_t EXPECTED_MAX_SYNCFRAME_SIZE = 10 + 20 * 16 + 2; // = 332
+static_assert(EXPECTED_MAX_SYNCFRAME_SIZE == 332,
+              "Sanity check: max SyncFrame size should be 332 bytes");
+// Note: BLE_FRAME_BUFFER_SIZE is now 512, which is > 332
 
 // ============================================================================
 // CRITICAL-4: Verify shared definitions exist (FreeRTOS, SAFE_LOG)
@@ -121,20 +121,20 @@ void testCritical1_SyncMaxSensors()
     TEST_ASSERT(SYNC_MAX_SENSORS == 20,
                 "SYNC_MAX_SENSORS == 20 (supports 16 sensors + headroom)");
 
-    TEST_ASSERT(SYNC_FRAME_MAX_PACKET_SIZE >= 10 + SYNC_MAX_SENSORS * 24,
+    TEST_ASSERT(SYNC_FRAME_MAX_PACKET_SIZE >= 10 + SYNC_MAX_SENSORS * 16,
                 "SYNC_FRAME_MAX_PACKET_SIZE fits max SyncFrame");
 
     // Verify SyncFrame 0x25 packet math for 16 sensors
-    size_t frame16 = 10 + 16 * 24; // = 394 bytes
-    TEST_ASSERT(frame16 == 394, "16-sensor SyncFrame = 394 bytes");
+    size_t frame16 = 10 + 16 * 16; // = 266 bytes
+    TEST_ASSERT(frame16 == 266, "16-sensor SyncFrame = 266 bytes");
     TEST_ASSERT(frame16 <= SYNC_FRAME_MAX_PACKET_SIZE,
                 "16-sensor SyncFrame fits in packet buffer");
 
     // Verify BLE_FRAME_BUFFER_SIZE (should be 512 in Gateway .ino)
     // We can't access the .ino constant here, but we verify the math:
-    size_t frame20_with_prefix = 10 + 20 * 24 + 2; // = 492 bytes
-    TEST_ASSERT(frame20_with_prefix == 492,
-                "20-sensor SyncFrame + length prefix = 492 bytes (< 512 buffer)");
+    size_t frame20_with_prefix = 10 + 20 * 16 + 2; // = 332 bytes
+    TEST_ASSERT(frame20_with_prefix == 332,
+                "20-sensor SyncFrame + length prefix = 332 bytes (< 512 buffer)");
 }
 
 void testCritical2_SampleRate()
@@ -162,16 +162,8 @@ void testCritical3_MaxSensors()
 {
     Serial.println("\n=== CRITICAL-3: MAX_SENSORS Alignment ===");
 
-    TEST_ASSERT(MAX_SENSORS == 8,
-                "Gateway MAX_SENSORS == 8 (matches TCA9548A channels)");
-
-    // Verify ESPNowDataPacket struct can hold 8 sensors
-    TEST_ASSERT(sizeof(ESPNowDataPacket) == 1 + 1 + 4 + 8 * sizeof(CompressedSensorData),
-                "ESPNowDataPacket sized for 8 sensors");
-
-    // Verify CompressedSensorData packing
-    TEST_ASSERT(sizeof(CompressedSensorData) == 21,
-                "CompressedSensorData = 21 bytes (1+8+6+6)");
+    TEST_ASSERT(MAX_SENSORS == 4,
+                "Gateway MAX_SENSORS == 4 (direct I2C: Wire+Wire1 x 0x68/0x69)");
 }
 
 void testCritical4_ConfigParity()

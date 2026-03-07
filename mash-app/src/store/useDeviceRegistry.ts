@@ -1,6 +1,6 @@
 /**
  * Device Registry: Zustand store for managing multiple IMU devices.
- * Supports both real BLE devices and simulated data.
+ * Supports both real devices and simulated data.
  */
 
 import { create } from "zustand";
@@ -35,7 +35,7 @@ export interface AxisConfig {
 
 // import * as THREE from "three"; // REMOVED UNUSED
 import { useNetworkStore } from "./useNetworkStore";
-import type { IMUDataPacket } from "../lib/ble/DeviceInterface";
+import type { IMUDataPacket } from "../lib/protocol/DeviceInterface";
 import { makeDeviceKey } from "../lib/deviceKey";
 import {
   STALE_THRESHOLD_MS,
@@ -101,6 +101,15 @@ export function getVqfDiagnosticsForDevice(
   deviceId: string,
 ): VqfDivergenceState | undefined {
   return _vqfDiagState.get(deviceId);
+}
+
+/**
+ * Read live diagnostics directly from the VQF filter instance for a device.
+ * Includes restDetected, restConfirmedFrames, lastErrorDeg, maxErrorDeg.
+ * Returns null if no filter has been created for this device yet.
+ */
+export function getVqfFilterDiagnostics(deviceId: string) {
+  return filterRegistry.get(deviceId)?.getDiagnostics() ?? null;
 }
 
 // ── Accel/gyro value-range monitoring ───────────────────────────────────
@@ -406,10 +415,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
         },
         axisConfig: {},
         setAxisConfig: (deviceId, config) => {
-          console.debug(
-            `[Registry] Setting Axis Config for ${deviceId}:`,
-            config,
-          );
           // Clear VQF so it reinits with new frame
           filterRegistry.delete(deviceId);
 
@@ -467,10 +472,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
           const [w, x, y, z] = currentQ;
           const invQ: [number, number, number, number] = [w, -x, -y, -z];
 
-          console.debug(
-            `[Registry] Taring ${deviceId}. Current: ${currentQ.map((v) => v.toFixed(3)).join(",")} -> Offset: ${invQ.map((v) => v.toFixed(3)).join(",")}`,
-          );
-
           set((state) => ({
             mountingOffsets: { ...state.mountingOffsets, [deviceId]: invQ },
           }));
@@ -483,15 +484,11 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
         lowPassEnabled: false,
         lowPassCutoffHz: 10,
         setLowPassEnabled: (enabled) => {
-          console.debug(
-            `[Registry] Low-pass filter ${enabled ? "ENABLED" : "DISABLED"}`,
-          );
           // Clear filter cache when toggling to reset state
           lowPassCache.clear();
           set({ lowPassEnabled: enabled });
         },
         setLowPassCutoffHz: (hz) => {
-          console.debug(`[Registry] Low-pass cutoff set to ${hz} Hz`);
           set({ lowPassCutoffHz: hz });
         },
 
@@ -502,17 +499,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
         setEKFConfig: (gyroNoise, accelNoise) => {
           // Mapping legacy EKF slider params to VQF if needed,
           // or just ignoring if VQF doesn't need tuning.
-          // For now, let's assume sliders adjust time constants slightly
-          // Low Noise => Higher Tau (trust prediction more)
-          // High Noise => Lower Tau (trust measurement more)
-          // const multiplier = 1.0;
-
-          /*
-          ekfConfig = {
-            gyroNoiseDensity: gyroNoise,
-            accelNoiseDensity: accelNoise,
-          };
-          */
           set({ ekfGyroNoise: gyroNoise, ekfAccelNoise: accelNoise });
           // Force filter recreation
           filterRegistry.clear();
@@ -549,6 +535,10 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                 nextHealth === "offline";
 
               if (device.connectionHealth !== nextHealth) {
+                // LIFECYCLE LOG: Health state transition
+                console.info(
+                  `[CONN:LIFECYCLE] Device ${id} health: ${device.connectionHealth} → ${nextHealth} (last data ${(timeSinceData / 1000).toFixed(1)}s ago, source=${statsLastUpdate === device.lastUpdate ? "react" : "cache"})`,
+                );
                 devices.set(id, { ...device, connectionHealth: nextHealth });
                 changed = true;
               }
@@ -559,8 +549,56 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                   firstSeen != null &&
                   now - firstSeen > ESTABLISHED_DEVICE_MIN_AGE_MS;
                 if (isEstablished) {
-                  lastDisconnectedDeviceId = id;
-                  lastDisconnectTime = now;
+                  // DEBOUNCE: Only set lastDisconnectedDeviceId after a 2s
+                  // debounce. If the device recovers within 2s, the alert
+                  // never fires. This prevents transient USB stalls from
+                  // triggering the modal.
+                  const deviceIdForDebounce = id;
+                  setTimeout(() => {
+                    const currentDevice = useDeviceRegistry
+                      .getState()
+                      .devices.get(deviceIdForDebounce);
+                    if (
+                      currentDevice &&
+                      currentDevice.connectionHealth === "offline"
+                    ) {
+                      const rawNodeId = currentDevice.rawNodeId ?? 0;
+                      const localSensorIndex =
+                        currentDevice.localSensorIndex ?? -1;
+                      const hasVerifiedPhysicalIdentity =
+                        rawNodeId > 0 && localSensorIndex >= 0;
+                      const topologySensorCount = hasVerifiedPhysicalIdentity
+                        ? useNetworkStore
+                            .getState()
+                            .getNodeSensorCountByRawId(rawNodeId)
+                        : undefined;
+                      const isKnownTopologySensor =
+                        hasVerifiedPhysicalIdentity &&
+                        typeof topologySensorCount === "number" &&
+                        topologySensorCount > 0 &&
+                        localSensorIndex < topologySensorCount;
+
+                      if (!isKnownTopologySensor) {
+                        console.info(
+                          `[CONN:LIFECYCLE] Disconnect debounce: suppressing unverified device ${deviceIdForDebounce} (rawNodeId=${rawNodeId}, localSensorIndex=${localSensorIndex})`,
+                        );
+                        return;
+                      }
+
+                      // Still offline after 2s — this is a real disconnection
+                      console.warn(
+                        `[CONN:LIFECYCLE] DISCONNECT CONFIRMED: ${deviceIdForDebounce} still offline after 2s debounce`,
+                      );
+                      useDeviceRegistry.setState({
+                        lastDisconnectedDeviceId: deviceIdForDebounce,
+                        lastDisconnectTime: Date.now(),
+                      });
+                    } else {
+                      console.info(
+                        `[CONN:LIFECYCLE] Disconnect debounce: ${deviceIdForDebounce} recovered within 2s — suppressing alert`,
+                      );
+                    }
+                  }, 2000);
                 }
               }
 
@@ -569,14 +607,17 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                 // - Keep established devices in registry across transient stalls to
                 //   avoid topology churn, VQF re-inits, and assignment flicker.
                 // - Only prune short-lived phantom devices (never established).
+                // - Always prune node_0_* — sensorId=0 is invalid (corrupt packet).
                 const firstSeen = deviceFirstSeenTime.get(id);
+                const isGhostZero = id.startsWith("node_0_");
                 const isEstablished =
+                  !isGhostZero &&
                   firstSeen != null &&
                   now - firstSeen > ESTABLISHED_DEVICE_MIN_AGE_MS;
 
                 if (!isEstablished) {
                   console.warn(
-                    `[Registry] ⚠️ Pruning transient device: ${id} (Last data: ${(timeSinceData / 1000).toFixed(1)}s ago)`,
+                    `[CONN:LIFECYCLE] PRUNE device: ${id} (transient, age=${firstSeen ? ((now - firstSeen) / 1000).toFixed(1) + "s" : "unknown"}, last data: ${(timeSinceData / 1000).toFixed(1)}s ago)`,
                   );
                   _transientPruneCount++;
                   devices.delete(id);
@@ -595,6 +636,12 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                   changed = true;
                 } else {
                   _retainedStaleCount++;
+                  // LIFECYCLE LOG: Established device retained despite being stale
+                  if (now - _lastStabilityLogMs > 10000) {
+                    console.info(
+                      `[CONN:LIFECYCLE] RETAIN device: ${id} (established, last data: ${(timeSinceData / 1000).toFixed(1)}s ago — will not prune)`,
+                    );
+                  }
                 }
               }
             }
@@ -607,9 +654,9 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                 );
               }
             }
-            return changed
-              ? { devices, lastDisconnectedDeviceId, lastDisconnectTime }
-              : {};
+            // NOTE: lastDisconnectedDeviceId is now set via debounced setTimeout
+            // (2s delay) so it does NOT flow through this synchronous return.
+            return changed ? { devices } : {};
           });
         },
         setViewMode: (mode) => set({ viewMode: mode }),
@@ -640,11 +687,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
           // VQF's internal bias is DISABLED (external bias subtracted before VQF).
           // This function now only stores the bias for external subtraction.
           // Do NOT set vqf.setBias() — that causes double-subtraction drift.
-          console.debug(
-            "[DeviceRegistry] Gyro bias stored for external subtraction:",
-            deviceId,
-            bias,
-          );
         },
 
         /**
@@ -658,10 +700,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
           if (vqf) {
             const currentQuat = vqf.getQuaternion();
             vqf.setHeadingAnchor(currentQuat);
-            console.debug(
-              "[DeviceRegistry] Set VQF heading anchor for",
-              deviceId,
-            );
           } else {
             console.warn(
               "[DeviceRegistry] No VQF filter for heading anchor:",
@@ -751,9 +789,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
               const now = Date.now();
               const lastLog = diagNodeInfoLogTime.get(nodeInfo.nodeName) || 0;
               if (now - lastLog > 10000) {
-                console.debug(
-                  `[Registry] Node Heartbeat: ${nodeInfo.nodeName} (Sensors ${sensorIdOffset}-${sensorIdOffset + sensorCount - 1}) via ${gatewayName}`,
-                );
                 diagNodeInfoLogTime.set(nodeInfo.nodeName, now);
               }
 
@@ -793,9 +828,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
                         transforms[candId].rotation[1] !== 0 ||
                         transforms[candId].rotation[2] !== 0)
                     ) {
-                      console.debug(
-                        `[Registry] New Connection Detected - Resetting calibration for: ${candId}`,
-                      );
                       transforms[candId] = {
                         ...transforms[candId],
                         rotation: [0, 0, 0], // Reset rotation to align with new identity frame
@@ -834,7 +866,7 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
 
             // PHASE-1: Use physical identity key when available.
             // SerialConnection already sets data.deviceId via makeDeviceKey(),
-            // but if the packet arrives without a deviceId (e.g. direct BLE),
+            // but if the packet arrives without a deviceId (e.g. direct serial),
             // construct it here from the IMUDataPacket fields.
             const imuForIdentity = data as IMUDataPacket;
             const deviceId =
@@ -875,7 +907,7 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
             // If sensorId=0 reaches here from format 0x23/0x24, it's legitimate
 
             // REMOVED: Gateway rejection filter
-            // Gateways advertise via BLE for control/monitoring but don't send sensor data
+            // Gateways advertise for control/monitoring but don't send sensor data
             // Nodes send data directly via TDMA packets (type 0x23) which bypass this registry
             // If a Gateway accidentally sends sensor-like data, it will fail sensorId check anyway
 
@@ -883,7 +915,7 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
             // DT CALCULATION WITH JITTER COMPENSATION
             // ================================================================
             // The firmware samples at 200Hz internally (5ms) but transmits at
-            // 50Hz (20ms frames). Packets arrive in bursts over BLE causing
+            // 50Hz (20ms frames). Packets arrive in bursts over USB serial causing
             // measured dt to vary wildly (10ms to 60ms observed).
             //
             // Strategy:
@@ -1045,9 +1077,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
 
             // Initialize VQF filter if new (Moved here to access corrected accel)
             if (!filterRegistry.has(deviceId)) {
-              console.debug(
-                `[Registry] Initializing VQF Filter for ${deviceId}`,
-              );
               const newVQF = new VQF(get().vqfConfig);
               // Initialize orientation from current accelerometer to avoid convergence lag
               if (accel) {
@@ -1185,11 +1214,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
               const lastTap = existing?.lastTapTime || 0;
               // Debounce: 500ms
               if (mag > 30.0 && now - lastTap > 500) {
-                console.debug(
-                  `[DeviceRegistry] Tap detected on ${deviceId} (Mag: ${mag.toFixed(
-                    2,
-                  )} m/s²)`,
-                );
                 // Trigger update with new tap time
                 // We'll update it in the set() below
                 // Mutating a local var to be used in next block
@@ -1401,7 +1425,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
 
         // NEW ACTIONS
         clear: () => {
-          console.debug("[DeviceRegistry] Clearing all devices");
           deviceAccelCache.clear();
           deviceGyroCache.clear();
           deviceQuaternionCache.clear();
@@ -1447,16 +1470,13 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
             // Explicit removal DOES NOT trigger "Unexpected Disconnection" alert
             return { devices };
           });
-
-          console.debug(
-            `[DeviceRegistry] Manually removed device ${deviceId} and cleared caches`,
-          );
         },
       };
     },
     {
       name: "device-registry-storage",
       version: 1,
+      migrate: (persistedState: unknown) => persistedState as any,
       storage: createJSONStorage(() => localStorage), // Switch to localStorage for better persistence
       partialize: (state) => ({
         activeTemplate: state.activeTemplate,
@@ -1479,12 +1499,6 @@ export const useDeviceRegistry = create<DeviceRegistryState>()(
             // harmless dead entries — physical keys (node_X_sY) get fresh
             // calibration. We cannot reliably migrate old → new because the
             // compact→physical mapping isn't available until sensors connect.
-            console.debug("[DeviceRegistry] Rehydrated state:", {
-              transformsCount: Object.keys(
-                rehydratedState?.sensorTransforms || {},
-              ).length,
-              threshold: rehydratedState?.zuptThreshold,
-            });
           }
         };
       },

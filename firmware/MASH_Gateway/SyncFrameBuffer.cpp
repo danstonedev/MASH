@@ -28,6 +28,15 @@
 // Forward declaration of external sync manager
 extern SyncManager syncManager;
 
+namespace
+{
+  uint64_t getSampleOrdinal(uint32_t frameNumber, uint8_t sampleIndex)
+  {
+    return (static_cast<uint64_t>(frameNumber) * TDMA_SAMPLES_PER_FRAME) +
+           static_cast<uint64_t>(sampleIndex);
+  }
+}
+
 // ============================================================================
 // Constructor
 // ============================================================================
@@ -36,7 +45,8 @@ SyncFrameBuffer::SyncFrameBuffer()
     : expectedSensorCount(0), effectiveSensorCount(0), oldestSlotIndex(0),
       outputFrameNumber(0), completedFrameCount(0), trulyCompleteFrameCount(0),
       partialRecoveryFrameCount(0), droppedFrameCount(0),
-      incompleteFrameCount(0), lastUpdateMs(0), slots(nullptr),
+      incompleteFrameCount(0), lastUpdateMs(0), latestObservedSampleOrdinal(0),
+      slots(nullptr),
       slotsAllocated(false)
 {
   // Initialize spinlock for thread safety
@@ -148,7 +158,7 @@ void SyncFrameBuffer::setExpectedSensors(const uint8_t *sensorIds,
 bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
                                 uint8_t localSensorIndex,
                                 uint32_t timestampUs,
-                                uint32_t frameNumber, const int16_t *q,
+                                uint32_t frameNumber, uint8_t sampleIndex,
                                 const int16_t *a, const int16_t *g)
 {
   // Guard: slots must be allocated before use
@@ -156,20 +166,12 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
     return false;
 
   // =========================================================================
-  // v10 SIMPLIFIED: EPOCH-RELATIVE ROUNDING (No per-node compensation)
+  // TIMESTAMP NORMALIZATION (for 0x25 output packet header only)
   // =========================================================================
-  // After extensive debugging, we found that:
-  // 1. Gateway reports 99.8% sync success at firmware level
-  // 2. But web app shows only 2.9% sync
-  //
-  // This suggests the sync frame ASSEMBLY is working, but something is wrong
-  // with timestamp transmission or parsing. Simplifying to eliminate
-  // complexity.
-  //
-  // v10 Approach: Just round all timestamps to nearest 5ms boundary relative
-  // to the shared epoch. This gives consistent slot assignment as long as
-  // nodes have similar beaconGatewayTimeUs values (which they should after
-  // receiving the same beacon).
+  // Slot matching (v11) uses (frameNumber, sampleIndex) as the primary key —
+  // not timestamp proximity. normalizedTs is still computed here so the
+  // emitted 0x25 packet header contains a clean, epoch-relative timestamp
+  // that the webapp can use for display and interpolation.
   // =========================================================================
 
   const uint32_t SAMPLE_PERIOD_US = 5000;
@@ -184,7 +186,7 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
   {
     if (lastKnownEpoch != 0)
     {
-      SAFE_LOG("[SYNC v10] Epoch changed %lu → %lu\n", lastKnownEpoch, epoch);
+      SAFE_LOG("[SYNC v11] Epoch changed %lu → %lu\n", lastKnownEpoch, epoch);
     }
     lastKnownEpoch = epoch;
     epochChangeTime = millis();
@@ -228,6 +230,9 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
   // =========================================================================
   // CROSS-NODE DIAGNOSTIC (log frame differences for debugging)
   // =========================================================================
+  // SIMP-5: Verbose cross-node diagnostic (enable with SYNC_DEBUG=1)
+  // =========================================================================
+#if SYNC_DEBUG
   // Auto-detect: use the FIRST sensor from each of the first two nodes
   // (based on expectedSensorIds list, where each node contributes a block)
   // Instead of hardcoded IDs, we use the first and "middle" expected sensor.
@@ -296,11 +301,13 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
                "issue <<<\n");
     }
   }
+#endif // SYNC_DEBUG
   // =========================================================================
 
   // =========================================================================
-  // DRIFT TRACKING (using normalized timestamps now)
+  // SIMP-5: Drift tracking diagnostic (enable with SYNC_DEBUG=1)
   // =========================================================================
+#if SYNC_DEBUG
   // Uses auto-detected diagSensor1/diagSensor2 from above
   // =========================================================================
   static uint32_t lastNormTsN1 = 0;
@@ -358,6 +365,7 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
     maxRawDriftForSameNorm = 0;
     sameNormMatches = 0;
   }
+#endif // SYNC_DEBUG
   // =========================================================================
 
   // Validate sensor is expected
@@ -385,7 +393,7 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
   }
 
   // ========================================================================
-  // DIAGNOSTIC: Track samples received per sensor (per 5-second window)
+  // SIMP-5: RX rate diagnostic (enable with SYNC_DEBUG=1)
   // ========================================================================
   // Also detects inactive sensors and auto-adjusts expectedSensorCount
   // to prevent all frames being emitted via forceEmit (35ms timeout).
@@ -394,6 +402,7 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
   static uint32_t lastSampleRateLog = 0;
   samplesReceivedBySensor[sensorIndex]++;
 
+#if SYNC_DEBUG
   if (millis() - lastSampleRateLog > 5000)
   {
     lastSampleRateLog = millis();
@@ -416,10 +425,24 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
     // expireStaleSlots() using per-sample sensorLastSeenMs[] timestamps.
     // This provides ~1s detection latency instead of the previous 5s.
   }
+#else
+  // Still reset counters periodically even when debug is off
+  if (millis() - lastSampleRateLog > 5000)
+  {
+    lastSampleRateLog = millis();
+    for (uint8_t i = 0; i < expectedSensorCount; i++)
+      samplesReceivedBySensor[i] = 0;
+  }
+#endif // SYNC_DEBUG
 
-  // Find or create a slot for this NORMALIZED timestamp (v6 fix)
+  // Find or create a slot for this (frameNumber, sampleIndex) pair — the TDMA-authoritative key
   portENTER_CRITICAL(&_lock);
-  SyncTimestampSlot *slot = findOrCreateSlot(normalizedTs, frameNumber);
+  SyncTimestampSlot *slot = findOrCreateSlot(normalizedTs, frameNumber, sampleIndex);
+  const uint64_t sampleOrdinal = getSampleOrdinal(frameNumber, sampleIndex);
+  if (sampleOrdinal > latestObservedSampleOrdinal)
+  {
+    latestObservedSampleOrdinal = sampleOrdinal;
+  }
   if (!slot)
   {
     // Buffer full, oldest slot not yet complete
@@ -450,7 +473,6 @@ bool SyncFrameBuffer::addSample(uint8_t sensorId, uint8_t rawNodeId,
   sample.sensorId = sensorId;
   sample.rawNodeId = rawNodeId;               // S1-FIX: Physical identity
   sample.localSensorIndex = localSensorIndex; // S1-FIX: Local sensor index
-  memcpy(sample.q, q, sizeof(sample.q));
   memcpy(sample.a, a, sizeof(sample.a));
   memcpy(sample.g, g, sizeof(sample.g));
   sensorLastSeenMs[sensorIndex] = millis();
@@ -530,25 +552,8 @@ size_t SyncFrameBuffer::getCompleteFrame(uint8_t *outputBuffer, size_t maxLen)
 
   if (packetSize > 0)
   {
-    // ====================================================================
-    // SYNC QUALITY DIAGNOSTIC: Log timestamp spread across sensors
-    // ====================================================================
-    static uint32_t lastSyncDiagLog = 0;
-    static uint32_t maxSpreadSeen = 0;
-    static uint32_t framesWithNonZeroSpread = 0;
-
-    uint32_t spread = 0; // All sensors in a slot share the timestamp by design
-
-    if (spread > 0)
-    {
-      framesWithNonZeroSpread++;
-      if (spread > maxSpreadSeen)
-      {
-        maxSpreadSeen = spread;
-      }
-    }
-
     // Log sync quality every 5 seconds
+    static uint32_t lastSyncDiagLog = 0;
     if (millis() - lastSyncDiagLog > 5000)
     {
       lastSyncDiagLog = millis();
@@ -569,18 +574,6 @@ size_t SyncFrameBuffer::getCompleteFrame(uint8_t *outputBuffer, size_t maxLen)
                trueCompleteRate, expectedSensorCount, effectiveSensorCount);
       SAFE_LOG("               Total frames emitted: %lu\n",
                completedFrameCount);
-
-      if (framesWithNonZeroSpread > 0)
-      {
-        SAFE_LOG("               WARNING: %lu frames had non-zero timestamp "
-                 "spread (max=%lu us)\n",
-                 framesWithNonZeroSpread, maxSpreadSeen);
-      }
-      else
-      {
-        SAFE_PRINTLN("               Timestamp alignment: PERFECT (all sensors "
-                     "aligned)");
-      }
     }
 
     // Slot already cleared under lock above — no need to clear again
@@ -675,11 +668,15 @@ void SyncFrameBuffer::expireStaleSlots()
   struct PartialFrameLog
   {
     uint32_t timestampUs;
+    uint32_t frameNumber;
+    uint8_t sampleIndex;
     uint8_t sensorsPresent;
     uint8_t expectedCount;
+    uint32_t ageMs;
+    uint32_t lagSamples;
   };
   static uint32_t lastPartialLog = 0;
-  PartialFrameLog partialLog = {0, 0, 0};
+  PartialFrameLog partialLog = {0, 0, 0, 0, 0, 0, 0};
   bool shouldLogPartial = false;
 
   // Miss summary data (snapshot under lock, log outside)
@@ -690,13 +687,23 @@ void SyncFrameBuffer::expireStaleSlots()
   uint8_t missSummarySensorCount = 0;
 
   portENTER_CRITICAL(&_lock);
+  const uint64_t latestSampleOrdinal = latestObservedSampleOrdinal;
   for (uint8_t i = 0; i < SYNC_TIMESTAMP_SLOTS; i++)
   {
     if (slots[i].active)
     {
       uint32_t age = now - slots[i].receivedAtMs;
+      const uint64_t slotOrdinal =
+          getSampleOrdinal(slots[i].frameNumber, slots[i].sampleIndex);
+      const uint32_t lagSamples =
+          (latestSampleOrdinal > slotOrdinal)
+              ? static_cast<uint32_t>(latestSampleOrdinal - slotOrdinal)
+              : 0;
+      const bool lateByStreamAdvance =
+          lagSamples >= SYNC_SLOT_ADVANCE_TIMEOUT_SAMPLES;
+      const bool lateByHardTimeout = age > SYNC_SLOT_TIMEOUT_MS;
 
-      if (age > SYNC_SLOT_TIMEOUT_MS)
+      if (lateByStreamAdvance || lateByHardTimeout)
       {
         // Skip if already forced (avoid double processing)
         if (slots[i].forceEmit)
@@ -727,8 +734,12 @@ void SyncFrameBuffer::expireStaleSlots()
             if (now - lastPartialLog > 2000)
             {
               partialLog.timestampUs = slots[i].timestampUs;
+              partialLog.frameNumber = slots[i].frameNumber;
+              partialLog.sampleIndex = slots[i].sampleIndex;
               partialLog.sensorsPresent = slots[i].sensorsPresent;
               partialLog.expectedCount = expectedSensorCount;
+              partialLog.ageMs = age;
+              partialLog.lagSamples = lagSamples;
               shouldLogPartial = true;
               lastPartialLog = now;
             }
@@ -774,10 +785,15 @@ void SyncFrameBuffer::expireStaleSlots()
   // ========================================================================
   if (shouldLogPartial)
   {
-    SAFE_LOG("[SyncFrame] TIMEOUT: Recovering partial frame ts=%lu (%d/%d "
-             "sensors)\n",
-             partialLog.timestampUs, partialLog.sensorsPresent,
-             partialLog.expectedCount);
+    SAFE_LOG("[SyncFrame] TIMEOUT: Recovering partial frame fn=%lu sample=%u "
+             "ts=%lu (%d/%d sensors, age=%lu ms, lag=%lu samples)\n",
+             (unsigned long)partialLog.frameNumber,
+             partialLog.sampleIndex,
+             (unsigned long)partialLog.timestampUs,
+             partialLog.sensorsPresent,
+             partialLog.expectedCount,
+             (unsigned long)partialLog.ageMs,
+             (unsigned long)partialLog.lagSamples);
   }
 
   if (shouldLogMissSummary)
@@ -842,6 +858,7 @@ void SyncFrameBuffer::reset()
   droppedFrameCount = 0;
   incompleteFrameCount = 0;
   lastUpdateMs = millis();
+  latestObservedSampleOrdinal = 0;
   effectiveSensorCount =
       expectedSensorCount; // Reset to full count on buffer reset
   memset(sensorLastSeenMs, 0, sizeof(sensorLastSeenMs));
@@ -877,42 +894,40 @@ void SyncFrameBuffer::printStatus() const
 // ============================================================================
 
 SyncTimestampSlot *SyncFrameBuffer::findOrCreateSlot(uint32_t normalizedTs,
-                                                     uint32_t frameNumber)
+                                                     uint32_t frameNumber,
+                                                     uint8_t sampleIndex)
 {
   // =========================================================================
-  // SIMPLIFIED SLOT MATCHING (v6)
+  // TDMA FRAME+SAMPLE SLOT MATCHING (v11 - Frame-Authoritative Key)
   // =========================================================================
-  // The incoming timestamp is ALREADY NORMALIZED by addSample() using the
-  // Gateway's epoch. It's been quantized to 5ms boundaries. We just need
-  // to find or create a matching slot.
+  // Primary key: (frameNumber, sampleIndex) — derived from the TDMA beacon,
+  // shared identically by all nodes in the same logical super-frame and
+  // sub-sample slot. This is beacon-authoritative and immune to timestamp
+  // rounding boundary aliasing.
   //
-  // With proper normalization, timestamps from ALL nodes should match
-  // exactly if they sampled at the same logical instant.
+  // v10 used normalizedTs as the sole key. This worked when all nodes received
+  // the same beacon, but if any node freewheeled or had even a few hundred µs
+  // of beacon jitter the rounding could land on opposite sides of a 5ms
+  // boundary → samples from the same logical moment went into different slots
+  // → never completed → force-emitted → low completeness (32% observed).
+  //
+  // v11 fix: match by (frameNumber, sampleIndex). normalizedTs is still stored
+  // per slot — averaged across the first arriving sensor — so the output 0x25
+  // packet header contains a sensible time value.
   // =========================================================================
 
-  // Use the header-defined tolerance (SYNC_TIMESTAMP_TOLERANCE_US = 2500µs)
-  // With frame-anchored normalization (v7), matching is deterministic and
-  // this tolerance is purely a safety net for edge cases.
-  const uint32_t TIMESTAMP_MATCH_TOLERANCE_US = SYNC_TIMESTAMP_TOLERANCE_US;
-
-  // First, look for existing slot with matching timestamp
+  // First: look for an existing active slot with the same (frameNumber, sampleIndex)
   for (uint8_t i = 0; i < SYNC_TIMESTAMP_SLOTS; i++)
   {
-    if (slots[i].active)
+    if (slots[i].active &&
+        slots[i].frameNumber == frameNumber &&
+        slots[i].sampleIndex == sampleIndex)
     {
-      uint32_t diff = (normalizedTs >= slots[i].timestampUs)
-                          ? (normalizedTs - slots[i].timestampUs)
-                          : (slots[i].timestampUs - normalizedTs);
-
-      if (diff <= TIMESTAMP_MATCH_TOLERANCE_US)
-      {
-        // Match found!
-        return &slots[i];
-      }
+      return &slots[i];
     }
   }
 
-  // No matching slot - find an empty one
+  // No matching slot — find an empty one
   for (uint8_t i = 0; i < SYNC_TIMESTAMP_SLOTS; i++)
   {
     if (!slots[i].active)
@@ -920,6 +935,7 @@ SyncTimestampSlot *SyncFrameBuffer::findOrCreateSlot(uint32_t normalizedTs,
       slots[i].active = true;
       slots[i].timestampUs = normalizedTs;
       slots[i].frameNumber = frameNumber;
+      slots[i].sampleIndex = sampleIndex;
       slots[i].receivedAtMs = millis();
       slots[i].sensorsPresent = 0;
       return &slots[i];
@@ -951,6 +967,7 @@ SyncTimestampSlot *SyncFrameBuffer::findOrCreateSlot(uint32_t normalizedTs,
     slots[oldestIdx].active = true;
     slots[oldestIdx].timestampUs = normalizedTs;
     slots[oldestIdx].frameNumber = frameNumber;
+    slots[oldestIdx].sampleIndex = sampleIndex;
     slots[oldestIdx].receivedAtMs = millis();
     slots[oldestIdx].sensorsPresent = 0;
     for (uint8_t j = 0; j < SYNC_MAX_SENSORS; j++)
@@ -1016,7 +1033,6 @@ size_t SyncFrameBuffer::buildAbsoluteFrame(const SyncTimestampSlot &slot,
   // value if setExpectedSensors() fires mid-function.
   const uint32_t nowMs = millis();
   const uint8_t localSensorCount = expectedSensorCount;
-  const uint8_t localEffectiveCount = effectiveSensorCount;
   uint8_t localSensorIds[SYNC_MAX_SENSORS];
   uint32_t localSensorLastSeenMs[SYNC_MAX_SENSORS];
   memcpy(localSensorIds, expectedSensorIds, localSensorCount);
@@ -1026,12 +1042,10 @@ size_t SyncFrameBuffer::buildAbsoluteFrame(const SyncTimestampSlot &slot,
   uint8_t includedIndices[SYNC_MAX_SENSORS] = {0};
   uint8_t includedCount = 0;
 
-  // PARTIAL-FRAME TRUTHFULNESS:
-  // For timeout-recovered slots, advertise ONLY sensors actually present in the
-  // slot. This prevents header sensorCount from overstating availability
-  // (e.g., advertised=15 while only 1-6 are valid).
   if (slot.forceEmit)
   {
+    // PARTIAL-FRAME TRUTHFULNESS: For timeout-recovered slots, advertise
+    // ONLY sensors actually present to avoid overstating availability.
     for (uint8_t i = 0; i < localSensorCount && includedCount < SYNC_MAX_SENSORS;
          i++)
     {
@@ -1043,22 +1057,18 @@ size_t SyncFrameBuffer::buildAbsoluteFrame(const SyncTimestampSlot &slot,
   }
   else
   {
-    // Prefer active-sensor view when effective count indicates some registered
-    // sensors are currently inactive. This keeps frame header sensorCount
-    // aligned with real-time streaming availability and avoids advertising
-    // phantom slots.
-    if (localEffectiveCount > 0 && localEffectiveCount < localSensorCount)
+    // SIMP-7: Unified active-sensor filtering for normal frames.
+    // Include sensors seen within the inactive threshold. If none pass
+    // (startup/transient), fall back to all registered sensors.
+    for (uint8_t i = 0;
+         i < localSensorCount && includedCount < SYNC_MAX_SENSORS; i++)
     {
-      for (uint8_t i = 0;
-           i < localSensorCount && includedCount < SYNC_MAX_SENSORS; i++)
+      const bool active =
+          localSensorLastSeenMs[i] > 0 &&
+          (nowMs - localSensorLastSeenMs[i]) <= SENSOR_INACTIVE_THRESHOLD_MS;
+      if (active)
       {
-        const bool active =
-            localSensorLastSeenMs[i] > 0 &&
-            (nowMs - localSensorLastSeenMs[i]) <= SENSOR_INACTIVE_THRESHOLD_MS;
-        if (active)
-        {
-          includedIndices[includedCount++] = i;
-        }
+        includedIndices[includedCount++] = i;
       }
     }
 
@@ -1120,7 +1130,6 @@ size_t SyncFrameBuffer::buildAbsoluteFrame(const SyncTimestampSlot &slot,
     // the web app if serial corruption flips the valid flag bit.
     sensorData[outIdx].sensorId =
         sample.present ? sample.sensorId : localSensorIds[i];
-    memcpy(sensorData[outIdx].q, sample.q, sizeof(sensorData[outIdx].q));
     memcpy(sensorData[outIdx].a, sample.a, sizeof(sensorData[outIdx].a));
     memcpy(sensorData[outIdx].g, sample.g, sizeof(sensorData[outIdx].g));
     sensorData[outIdx].flags = sample.present ? SYNC_SENSOR_FLAG_VALID : 0;

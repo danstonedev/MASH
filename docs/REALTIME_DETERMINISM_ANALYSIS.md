@@ -1,5 +1,7 @@
 # Real-Time Systems Analysis: IMU Data Pipeline Determinism
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** References to `TDMADataPacket` should read `TDMANodeDataPacket`. See `TDMAProtocol.h` for current definitions.
+
 **Date:** February 2, 2026  
 **Author:** Real-Time Systems Expert Analysis  
 **System:** ESP32-S3 Multi-Node IMU Synchronization

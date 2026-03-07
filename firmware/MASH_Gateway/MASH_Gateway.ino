@@ -77,7 +77,7 @@ static inline void enqueueSerialFrame(const uint8_t *frame, size_t len,
                                       bool isCommandResponse = false);
 static void logJson(const char *level, const char *message);
 static inline size_t writeUsbFifoDirect(const uint8_t *data, size_t len);
-static inline void sendFramedPacketDirect(const uint8_t *payload, size_t len);
+// SIMP-1: sendFramedPacketDirect removed — SyncFrames now routed through enqueueSerialFrame
 static inline void emitCompactSyncStatusDirect();
 static inline void emitPipelineDiagDirect();
 static inline void emitBootJsonFrameDirect(const char *phase);
@@ -262,7 +262,7 @@ static String serialCommandBuffer;
 // transport.
 // ============================================================================
 static constexpr size_t SERIAL_FRAME_BUFFER_SIZE =
-    512; // Fits 20-sensor SyncFrame (490 bytes) + headroom (AUDIT FIX
+    512; // Fits 20-sensor SyncFrame (330 bytes) + headroom (AUDIT FIX
          // 2026-02-08: was 256, too small for 16 sensors)
 static constexpr size_t SERIAL_TX_QUEUE_SIZE =
     64; // 320ms buffer at 200Hz â€” higher burst tolerance on USB CDC
@@ -284,9 +284,9 @@ struct SerialFrame
 };
 
 // Compile-time check: largest SyncFrame (0x25 absolute) must fit in serial
-// buffer 0x25 packet = 10 header + SYNC_MAX_SENSORS Ã— 24 bytes/sensor + 2
+// buffer 0x25 packet = 10 header + SYNC_MAX_SENSORS x 16 bytes/sensor + 2
 // length prefix
-static_assert(10 + SYNC_MAX_SENSORS * 24 + 2 <= SERIAL_FRAME_BUFFER_SIZE,
+static_assert(10 + SYNC_MAX_SENSORS * 16 + 2 <= SERIAL_FRAME_BUFFER_SIZE,
               "SERIAL_FRAME_BUFFER_SIZE too small for SYNC_MAX_SENSORS!");
 
 static QueueHandle_t serialTxQueue = nullptr;
@@ -411,33 +411,6 @@ static inline size_t writeUsbFifoDirect(const uint8_t *data, size_t len)
   return offset;
 }
 
-static inline void sendFramedPacketDirect(const uint8_t *payload, size_t len)
-{
-  if (payload == nullptr || len == 0)
-  {
-    return;
-  }
-
-  const uint16_t frameLen = (uint16_t)len;
-  uint8_t hdr[2] = {
-      (uint8_t)(frameLen & 0xFF),
-      (uint8_t)((frameLen >> 8) & 0xFF),
-  };
-
-  if (serialWriteMutex != nullptr)
-  {
-    xSemaphoreTake(serialWriteMutex, portMAX_DELAY);
-  }
-
-  writeUsbFifoDirect(hdr, sizeof(hdr));
-  writeUsbFifoDirect(payload, len);
-
-  if (serialWriteMutex != nullptr)
-  {
-    xSemaphoreGive(serialWriteMutex);
-  }
-}
-
 static inline void emitCompactSyncStatusDirect()
 {
   const uint32_t now = millis();
@@ -459,20 +432,60 @@ static inline void emitCompactSyncStatusDirect()
   const bool bufferReady = bufferInitialized && completedFrames > 0;
   const bool syncQualityOk = (syncRate > 50.0f) || (completedFrames < 10);
   const bool ready = tdmaRunning && hasAliveNodes && bufferReady && syncQualityOk;
+  const uint8_t authoritativeExpectedSensors =
+      syncFrameBuffer.getExpectedSensorCount();
+  const uint8_t activeStreamingSensors =
+      syncFrameBuffer.getEffectiveSensorCount();
 
-  char json[768];
+  // Build per-node array into a temporary buffer.
+  // Each node entry: {"nodeId":X,"alive":true,"lastHeardMs":XXXX,"sensorCount":X,"compactBase":X} ≈ 80 chars max
+  char nodesBuf[700]; // Fits up to ~8 nodes with full field names
+  int nodesPos = 0;
+  nodesBuf[nodesPos++] = '[';
+  bool firstNode = true;
+  for (uint8_t i = 0; i < syncManager.getMaxNodes(); i++)
+  {
+    if (regNodes[i].registered)
+    {
+      uint32_t lastHeardMs = now - regNodes[i].lastHeard;
+      bool alive = lastHeardMs < 5000;
+      uint8_t compactBase = syncManager.getCompactSensorId(regNodes[i].nodeId, 0);
+      int written = snprintf(
+          nodesBuf + nodesPos, sizeof(nodesBuf) - nodesPos,
+          "%s{\"nodeId\":%u,\"alive\":%s,\"lastHeardMs\":%lu,\"sensorCount\":%u,\"compactBase\":%u,\"name\":\"%s\"}",
+          firstNode ? "" : ",",
+          regNodes[i].nodeId,
+          alive ? "true" : "false",
+          (unsigned long)lastHeardMs,
+          regNodes[i].sensorCount,
+          compactBase,
+          regNodes[i].nodeName);
+      if (written > 0 && nodesPos + written < (int)sizeof(nodesBuf) - 2)
+      {
+        nodesPos += written;
+        firstNode = false;
+      }
+    }
+  }
+  nodesBuf[nodesPos++] = ']';
+  nodesBuf[nodesPos] = '\0';
+
+  char json[1280];
   const int jsonLen = snprintf(
       json, sizeof(json),
       "{\"type\":\"sync_status\",\"tdmaState\":\"%s\",\"isStreaming\":%s,"
-      "\"nodeCount\":%u,\"nodes\":[],"
-      "\"syncBuffer\":{\"initialized\":%s,\"expectedSensors\":%u,\"completedFrames\":%lu,\"trulyComplete\":%lu,\"partialRecovery\":%lu,\"dropped\":%lu,\"incomplete\":%lu,\"trueSyncRate\":%.2f},"
+      "\"nodeCount\":%u,\"nodes\":%s,"
+      "\"syncBuffer\":{\"initialized\":%s,\"expectedSensors\":%u,\"authoritativeExpectedSensors\":%u,\"activeStreamingSensors\":%u,\"completedFrames\":%lu,\"trulyComplete\":%lu,\"partialRecovery\":%lu,\"dropped\":%lu,\"incomplete\":%lu,\"trueSyncRate\":%.2f},"
       "\"serialTx\":{\"frames\":%lu,\"drops\":%lu,\"queueFree\":%u,\"paused\":%s},"
       "\"ready\":%s,\"readiness\":{\"tdmaRunning\":%s,\"hasAliveNodes\":%s,\"bufferReady\":%s,\"syncQualityOk\":%s,\"syncRate\":%.2f}}",
       syncManager.getTDMAStateName(),
       isStreaming ? "true" : "false",
       syncManager.getRegisteredNodeCount(),
+      nodesBuf,
       bufferInitialized ? "true" : "false",
-      (unsigned int)syncFrameBuffer.getExpectedSensorCount(),
+      (unsigned int)authoritativeExpectedSensors,
+      (unsigned int)authoritativeExpectedSensors,
+      (unsigned int)activeStreamingSensors,
       (unsigned long)completedFrames,
       (unsigned long)syncFrameBuffer.getTrulyCompleteFrames(),
       (unsigned long)syncFrameBuffer.getPartialRecoveryFrames(),
@@ -615,7 +628,16 @@ void setup()
   // -----------------------------------------------------------------------
   {
     uint32_t waitStart = millis();
-    const uint32_t HWCDC_CONNECT_TIMEOUT_MS = 5000;
+    // ========================================================================
+    // OPT-1: Reduced from 5000ms to 1000ms.
+    // The gateway's primary job is ESP-NOW coordination, which doesn't need
+    // USB. Waiting 5s for a CDC handshake delays TDMA discovery by 4 seconds
+    // — during which all nodes are sitting idle on channel 1 waiting for a
+    // beacon. 1s is enough for an already-enumerated USB device to handshake.
+    // If no host is connected, we proceed anyway — serial output isn't
+    // required for TDMA operation.
+    // ========================================================================
+    const uint32_t HWCDC_CONNECT_TIMEOUT_MS = 1000;
     while (!Serial && (millis() - waitStart < HWCDC_CONNECT_TIMEOUT_MS))
     {
       delay(10);
@@ -778,6 +800,8 @@ void setup()
   // Discovery Lock / Late-Join Control
   commandHandler.setDiscoveryLockCallback(onDiscoveryLock);
   commandHandler.setTDMARescanCallback(onTDMARescan);
+  commandHandler.setExpectedNodesCallback(onSetExpectedNodes);
+  commandHandler.setClearTopologyCallback(onClearTopology);
   commandHandler.setAcceptNodeCallback(onAcceptNode);
   commandHandler.setRejectNodeCallback(onRejectNode);
   commandHandler.setPendingNodesCallback(onGetPendingNodes);
@@ -951,15 +975,13 @@ void setup()
     Serial.println("========================================\n");
   }
 
-  // Initialize WiFi
-  // CRITICAL STABILITY FIX: Disable WiFi Power Save
-  // ESP-NOW + BLE coexistence requires the radio to be always on.
-  // Default power save (DTIM) causes radio to sleep, leading to packet loss,
-  // sync failure, and eventually BLE connection termination.
-  WiFi.mode(WIFI_AP_STA);
-  esp_wifi_set_ps(WIFI_PS_NONE);
+  // WiFi mode and power save are now managed by SyncManager::init().
+  // SyncManager sets WIFI_STA (ESP-NOW exclusive radio access) and
+  // disables power save. WiFiManager::startAP() switches to WIFI_AP_STA
+  // on demand when SoftAP is needed.
+  // DO NOT set WiFi.mode() here — it would be overridden by SyncManager.
   Serial.println(
-      "[Setup] WiFi Power Save DISABLED (Required for ESP-NOW stability)");
+      "[Setup] WiFi mode managed by SyncManager (WIFI_STA + PS_NONE)");
 
   // Initialize ESP-NOW Sync Manager
   syncManager.init(deviceName.c_str());
@@ -994,9 +1016,8 @@ void setup()
 
     // Periodic diagnostic output
     if (millis() - lastDiagLog > 3000) {
-      Serial.printf("[DIAG] Callback invoked %d times, isStreaming=%d, "
-                    "sizeof(ESPNowDataPacket)=%d\n",
-                    callbackCount, isStreaming, sizeof(ESPNowDataPacket));
+      Serial.printf("[DIAG] Callback invoked %d times, isStreaming=%d\n",
+                    callbackCount, isStreaming);
       callbackCount = 0;
       lastDiagLog = millis();
     }
@@ -1040,6 +1061,79 @@ void setup()
           Serial.printf("[Gateway] NodeInfo: rawId=%d compactBase=%d (%d bytes)\n",
                         rawNodeId, compactBase, len);
           lastNodeLog = millis();
+        }
+      }
+      return;
+    }
+
+    // Power diagnostics (0x0A) should ALWAYS be forwarded as JSON event
+    if (packetType == POWER_DIAG_PACKET) {
+      if (len == sizeof(ESPNowPowerDiagPacket)) {
+        ESPNowPowerDiagPacket packet;
+        memcpy(&packet, data, sizeof(packet));
+
+        char json[256];
+        snprintf(json, sizeof(json),
+                 "{\"type\":\"node_power_diag\",\"nodeId\":%u,\"bootCount\":%lu,\"brownoutCount\":%lu,\"lastResetReason\":%u,\"recoveryActive\":%s,\"uptimeMs\":%lu}",
+                 packet.nodeId,
+                 (unsigned long)packet.bootCount,
+                 (unsigned long)packet.brownoutCount,
+                 packet.lastResetReason,
+                 packet.recoveryActive ? "true" : "false",
+                 (unsigned long)packet.uptimeMs);
+        enqueueJsonFrame(String(json));
+
+        Serial.printf("[Gateway] PowerDiag node=%u brownouts=%lu reason=%u\n",
+                      packet.nodeId,
+                      (unsigned long)packet.brownoutCount,
+                      packet.lastResetReason);
+      } else {
+        static uint32_t lastPowerDiagLenWarnMs = 0;
+        if (millis() - lastPowerDiagLenWarnMs > 5000) {
+          Serial.printf("[Gateway] PowerDiag ignored: unexpected len=%d expected=%u\n",
+                        len,
+                        (unsigned)sizeof(ESPNowPowerDiagPacket));
+          lastPowerDiagLenWarnMs = millis();
+        }
+      }
+      return;
+    }
+
+    // TDMA diagnostics (0x0B) should ALWAYS be forwarded as JSON event
+    if (packetType == TDMA_DIAG_PACKET) {
+      if (len == sizeof(ESPNowTDMADiagPacket)) {
+        ESPNowTDMADiagPacket packet;
+        memcpy(&packet, data, sizeof(packet));
+
+        char json[320];
+        snprintf(json, sizeof(json),
+                 "{\"type\":\"node_tdma_diag\",\"nodeId\":%u,\"intervalMs\":%u,\"txAttempts\":%u,\"txSuccess\":%u,\"txFail\":%u,\"txStallClears\":%u,\"staleIncompleteDrops\":%u,\"maxQueueDepth\":%u,\"currentFrame\":%lu}",
+                 packet.nodeId,
+                 packet.intervalMs,
+                 packet.txAttempts,
+                 packet.txSuccess,
+                 packet.txFail,
+                 packet.txStallClears,
+                 packet.staleIncompleteDrops,
+                 packet.maxQueueDepth,
+                 (unsigned long)packet.currentFrame);
+        enqueueJsonFrame(String(json));
+
+        Serial.printf("[Gateway] TDMADiag node=%u attempts=%u success=%u fail=%u stalls=%u staleDrops=%u qMax=%u\n",
+                      packet.nodeId,
+                      packet.txAttempts,
+                      packet.txSuccess,
+                      packet.txFail,
+                      packet.txStallClears,
+                      packet.staleIncompleteDrops,
+                      packet.maxQueueDepth);
+      } else {
+        static uint32_t lastTDMADiagLenWarnMs = 0;
+        if (millis() - lastTDMADiagLenWarnMs > 5000) {
+          Serial.printf("[Gateway] TDMADiag ignored: unexpected len=%d expected=%u\n",
+                        len,
+                        (unsigned)sizeof(ESPNowTDMADiagPacket));
+          lastTDMADiagLenWarnMs = millis();
         }
       }
       return;
@@ -1108,54 +1202,8 @@ void setup()
         memcpy(&magPacketBuffer, data, sizeof(ESPNowMagCalibPacket));
         magPacketReceived = true;
       }
-    } else if (packetType == TDMA_PACKET_DATA) { // TDMA Batched IMU Data (0x23)
-      // ========================================================================
-      // DUAL-CORE PIPELINE: Enqueue raw packet for Core 1 processing
-      // ========================================================================
-      // Instead of processing here (WiFi callback, Core 0, priority ~23),
-      // we just copy the raw packet into the RX queue. DataIngestionTask on
-      // Core 1 handles decoding and SyncFrameBuffer insertion.
-      // This keeps the callback under 5Âµs and prevents WiFi stack stalls.
-      // ========================================================================
-
-      TDMADataPacket *tdmaV1 = (TDMADataPacket *)data;
-      uint8_t nodeId = tdmaV1->nodeId;
-
-      // Update lastHeard (lightweight, no queue needed)
-      syncManager.updateNodeLastHeard(nodeId);
-
-      // Enqueue for Core 1 processing
-      if (espNowRxQueue != nullptr && useSyncFrameMode &&
-          syncFrameBufferInitialized) {
-        EspNowRxPacket rxPkt;
-        rxPkt.len = (len <= sizeof(rxPkt.data)) ? len : sizeof(rxPkt.data);
-        memcpy(rxPkt.data, data, rxPkt.len);
-        if (len > sizeof(rxPkt.data)) {
-          static uint32_t lastTruncWarn = 0;
-          if (millis() - lastTruncWarn > 5000) {
-            Serial.printf("[WARN] ESP-NOW packet TRUNCATED: %d -> %d bytes! "
-                          "Increase ESPNOW_RX_BUFFER_SIZE\n",
-                          len, (int)sizeof(rxPkt.data));
-            lastTruncWarn = millis();
-          }
-        }
-        if (xQueueSend(espNowRxQueue, &rxPkt, 0) != pdTRUE) {
-          espNowRxDropCount++;
-        }
-      }
-
-      // Periodic logging
-      static uint32_t lastTdmaLog = 0;
-      static uint32_t tdmaPacketCount = 0;
-      tdmaPacketCount++;
-      if (millis() - lastTdmaLog > 2000) {
-        Serial.printf("[TDMA] RX: %lu pkts, last: node=%d syncMode=%d\n",
-                      tdmaPacketCount, nodeId, useSyncFrameMode);
-        tdmaPacketCount = 0;
-        lastTdmaLog = millis();
-      }
     } else if (packetType ==
-               TDMA_PACKET_DATA_DELTA) { // Node Delta-Encoded Data (0x26)
+               TDMA_PACKET_NODE_DATA) { // Node Data (0x26)
       // ========================================================================
       // DUAL-CORE PIPELINE: Enqueue raw 0x26 packet for Core 1 processing
       // ========================================================================
@@ -1163,8 +1211,8 @@ void setup()
       // ========================================================================
 
       // Extract nodeId for lastHeard update (lightweight)
-      if (len >= TDMA_NODE_DELTA_HEADER_SIZE) {
-        const TDMANodeDeltaPacket *header = (const TDMANodeDeltaPacket *)data;
+      if (len >= TDMA_NODE_DATA_HEADER_SIZE) {
+        const TDMANodeDataPacket *header = (const TDMANodeDataPacket *)data;
         syncManager.updateNodeLastHeard(header->nodeId);
       }
 
@@ -1204,15 +1252,15 @@ void setup()
         if (!syncFrameBufferInitialized) {
           syncFrameBuffer.init(expectedSensorIds, totalSensors);
           syncFrameBufferInitialized = true;
-          Serial.printf("[SyncFrame] Late-initialized with %d sensors: ",
-                        totalSensors);
+          SAFE_LOG("[SyncFrame] Late-initialized with %d sensors: ",
+                   totalSensors);
         } else {
           syncFrameBuffer.setExpectedSensors(expectedSensorIds, totalSensors);
         }
         for (uint8_t i = 0; i < totalSensors; i++) {
-          Serial.printf("%d ", expectedSensorIds[i]);
+          SAFE_LOG("%d ", expectedSensorIds[i]);
         }
-        Serial.println();
+        SAFE_PRINTLN("");
 
         // ======================================================================
         // DEFERRED SYNC RESET: When a new node joins during streaming, flag
@@ -1221,20 +1269,35 @@ void setup()
         // This avoids stacking multiple 200ms reset windows per node.
         // ======================================================================
         if (isStreaming) {
-          Serial.printf("[SYNC] New node %d registered during streaming - "
-                        "deferring SYNC_RESET\n",
-                        nodeId);
+          SAFE_LOG("[SYNC] New node %d registered during streaming - "
+                   "deferring SYNC_RESET\n",
+                   nodeId);
           pendingSyncReset = true;
-          syncFrameBuffer.reset(); // Clear buffer to avoid stale samples
+          // NOTE: Do NOT call syncFrameBuffer.reset() here. The deferred path
+          // in ProtocolTask fires ONE reset after TDMA reaches RUNNING state,
+          // preventing repeated resets that corrupt trueSyncRate statistics.
         }
       }
+    }
+    // Immediately emit updated sync_status so webapp sees new node
+    emitCompactSyncStatusDirect();
+
+    // SWOT-O2: Emit node_registered event so webapp can update topology
+    // immediately without waiting for next sync_status poll.
+    {
+      uint8_t compactBase = syncManager.getCompactSensorId(nodeId, 0);
+      char json[160];
+      snprintf(json, sizeof(json),
+               "{\"type\":\"node_registered\",\"nodeId\":%u,\"sensorCount\":%u,\"compactBase\":%u}",
+               nodeId, sensorCount, compactBase);
+      enqueueJsonFrame(String(json));
     } });
 
   // Set callback for when inactive nodes are pruned (NVS stale topology fix)
   // This ensures SyncFrameBuffer no longer emits phantom sensor IDs from
   // nodes that went offline. Without this, stale NVS entries inflate
   // expectedSensorCount and produce IDs like 101 in 0x25 frames.
-  syncManager.setNodePrunedCallback([]()
+  syncManager.setNodePrunedCallback([](const uint8_t *prunedNodeIds, uint8_t prunedCount)
                                     {
     if (useSyncFrameMode && syncFrameBufferInitialized) {
       uint8_t expectedSensorIds[SYNC_MAX_SENSORS];
@@ -1243,17 +1306,31 @@ void setup()
 
       if (totalSensors > 0) {
         syncFrameBuffer.setExpectedSensors(expectedSensorIds, totalSensors);
-        Serial.printf("[SyncFrame] Pruned â†’ updated to %d sensors: ",
-                      totalSensors);
+        SAFE_LOG("[SyncFrame] Pruned - updated to %d sensors: ",
+                 totalSensors);
         for (uint8_t i = 0; i < totalSensors; i++) {
-          Serial.printf("%d ", expectedSensorIds[i]);
+          SAFE_LOG("%d ", expectedSensorIds[i]);
         }
-        Serial.println();
+        SAFE_PRINTLN("");
       } else {
-        // All nodes pruned â€” reset the buffer entirely
+        // All nodes pruned - reset the buffer entirely
         syncFrameBuffer.reset();
         syncFrameBufferInitialized = false;
-        Serial.println("[SyncFrame] All nodes pruned â€” buffer reset");
+        SAFE_PRINTLN("[SyncFrame] All nodes pruned - buffer reset");
+      }
+    } 
+    // Immediately emit updated sync_status so webapp sees topology change
+    emitCompactSyncStatusDirect();
+
+    // SWOT-O2: Emit per-node node_pruned events so webapp can immediately
+    // update topology without waiting for next sync_status poll.
+    if (prunedNodeIds != nullptr && prunedCount > 0) {
+      for (uint8_t i = 0; i < prunedCount; i++) {
+        char json[100];
+        snprintf(json, sizeof(json),
+                 "{\"type\":\"node_pruned\",\"nodeId\":%u}",
+                 prunedNodeIds[i]);
+        enqueueJsonFrame(String(json));
       }
     } });
 
@@ -1300,27 +1377,14 @@ void setup()
   // }
   Serial.println("[Setup] WiFi auto-connect disabled (ESP-NOW on channel 1)");
 
-  // Streaming is disabled at boot. The web app sends {"cmd":"START"} after
-  // connecting, which calls onStartStreaming() â†’ sets isStreaming=true and
-  // suppressSerialLogs=true. Until then, Serial Monitor shows text logs.
-  suppressSerialLogs = false;
-  isStreaming = false;
-  Serial.println("[Setup] Streaming disabled until START command");
-
   // ============================================================================
-  // BACKGROUND DISCOVERY: Start TDMA immediately (Warm Standby)
+  // STREAMING + TDMA: Already active from onStartStreaming() above (line ~979).
+  // That call sets isStreaming=true, starts TDMA if not active, and initializes
+  // the SyncFrameBuffer. The loop() latch below ensures streaming stays on
+  // even if a command-path glitch toggles it off.
   // ============================================================================
-  // Starting TDMA in setup() allows nodes to register and send metadata
-  // immediately upon boot, even before the webapp connects.
-  // Since isStreaming is false, nodes will stay in low-power standby (25Hz)
-  // until the webapp sends {"cmd":"START"}.
-  // ============================================================================
-  if (!syncManager.isTDMAActive())
-  {
-    syncManager.startTDMA();
-  }
   Serial.println(
-      "[Setup] TDMA Background Discovery enabled (nodes can register now)");
+      "[Setup] TDMA + Streaming active (nodes can register immediately)");
 
   setStatusColor(50, 0, 50); // Purple = Gateway ready
 
@@ -1362,8 +1426,9 @@ void setup()
 
 void loop()
 {
-  // Keep stream intent latched during diagnostics; command-path glitches
-  // should not disable gateway repackaging.
+  // STREAM LATCH: Streaming is enabled in setup() via onStartStreaming().
+  // This guard catches edge cases where a command-path glitch or error handler
+  // accidentally clears the flag. The gateway must always forward ESP-NOW data.
   if (!isStreaming)
   {
     isStreaming = true;
@@ -1603,9 +1668,10 @@ void loop()
       lastDisplayUpdate = millis();
 
       DisplayStatus ds;
-      // Keep display counts aligned with web topology semantics:
-      // show registered/expected sensors, not a transient "active in last 3s" snapshot.
-      ds.nodeCount = syncManager.getRegisteredNodeCount();
+      // Show SYNCED nodes (those that have sent actual data/PTP packets
+      // in the last 5 seconds). Registration-only nodes are excluded —
+      // they are trying to sync but aren't yet part of the active system.
+      ds.nodeCount = syncManager.getSyncedNodeCount(5000);
 
       // V6-FIX: Was MAX_SENSORS (8) — truncated 15 sensors to 8 on display.
       // Use SYNC_MAX_SENSORS (20) to support up to 20 sensors across all nodes.
@@ -1625,9 +1691,13 @@ void loop()
       ds.webAppConnected = wsStarted && wsManager.hasClients();
       ds.wifiConnected = wifiManager.isConnected();
       ds.recording = isStreaming;
+      ds.tdmaState = (uint8_t)syncManager.getTDMAState();
 
       displayManager.update(ds);
     }
+
+    // Update Gateway NeoPixel (TDMA-state-driven, includes breathing)
+    updateGatewayLED();
   }
 
   // Gateway is mostly idle - ESP-NOW callbacks handle data forwarding

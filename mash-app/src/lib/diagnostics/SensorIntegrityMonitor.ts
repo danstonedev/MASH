@@ -19,7 +19,7 @@
  *    can annotate frames and accumulate session-level statistics
  */
 
-import type { IMUDataPacket } from "../ble/DeviceInterface";
+import type { IMUDataPacket } from "../protocol/DeviceInterface";
 
 // ============================================================================
 // Configuration — all thresholds are compile-time constants

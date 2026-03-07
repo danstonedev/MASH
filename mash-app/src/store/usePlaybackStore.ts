@@ -27,6 +27,10 @@ import {
   type PackedSensorTimeline,
   type PreparePlaybackSessionResult,
 } from "../lib/playback/preparePlaybackSession";
+import {
+  analyzeGaps,
+  type GapAnalysisReport as GapAnalysisReportType,
+} from "../analysis/GapAnalysis";
 
 // ============================================================================
 // TYPES
@@ -43,6 +47,7 @@ export interface PlaybackState {
   sensorIds: number[]; // List of sensors in session
   sensorMapping: Record<number, string>; // ID -> Segment mapping
   calibrationOffsets: SerializedCalibrationOffset[]; // Stored calibration for playback
+  gapReport: GapAnalysisReportType | null; // Pre-computed data integrity report
 
   // Playback state
   isLoadingSession: boolean;
@@ -163,6 +168,7 @@ async function preparePlaybackInWorker(
       sessionStartTime: session.startTime,
       sessionEndTime: session.endTime,
       defaultFrameRate: DEFAULT_FRAME_RATE,
+      recordedSampleRate: session.sampleRate,
     });
   });
 }
@@ -178,6 +184,7 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
   sensorIds: [],
   sensorMapping: {},
   calibrationOffsets: [],
+  gapReport: null,
 
   isLoadingSession: false,
   isPlaying: false,
@@ -221,6 +228,22 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
         return false;
       }
 
+      // =====================================================================
+      // PRE-COMPUTE GAP ANALYSIS from raw DB frames BEFORE preparation
+      // munges timestamps. This uses gateway frame numbers as the single
+      // source of truth for 200Hz synchronisation integrity.
+      // =====================================================================
+      const wallClockDuration =
+        session.endTime && session.endTime > session.startTime
+          ? session.endTime - session.startTime
+          : undefined;
+      const gapReport = analyzeGaps(
+        frames,
+        sessionId,
+        session.sampleRate || undefined,
+        wallClockDuration,
+      );
+
       let prepared: PreparePlaybackSessionResult;
       let workerUsed = true;
       try {
@@ -236,6 +259,7 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
           sessionStartTime: session.startTime,
           sessionEndTime: session.endTime,
           defaultFrameRate: DEFAULT_FRAME_RATE,
+          recordedSampleRate: session.sampleRate,
         });
       }
       const tAfterPrepare = performance.now();
@@ -367,6 +391,7 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
         loopStart: null,
         loopEnd: null,
         isLooping: false,
+        gapReport,
       });
 
       // Enable Kinematics Playback Mode
@@ -418,6 +443,7 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
       currentFrameIndex: 0,
       loopStart: null,
       loopEnd: null,
+      gapReport: null,
     });
   },
 

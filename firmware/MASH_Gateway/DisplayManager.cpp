@@ -9,22 +9,19 @@
  * SPI freq: 80 MHz
  * Offsets: col=34 (172px centered in 240px controller RAM), row=0
  *
- * Gateway display layout (172×320 pixels):
- * ┌──────────────────────────────┐
- * │       MASH GW                │  Header (dark blue)
- * ├──────────────────────────────┤
- * │                              │
- * │  2  Nodes                    │  Count (green / red)
- * │                              │
- * │  4  Sensors                  │  Count (green / red)
- * │                              │
- * │  ●  Web App      Connected  │  Green / Red dot
- * │                              │
- * │  ●  WiFi         Connected  │  Green / Red dot
- * │                              │
- * │  ●  Recording               │  Green / Gray dot
- * │                              │
- * └──────────────────────────────┘
+ * Gateway display layout (172x320 pixels):
+ * +------------------------------+
+ * |       MASH GW                |  Header (dark blue)
+ * +------------------------------+
+ * |      [ DISCOVERY ]           |  TDMA State banner (color-coded)
+ * +------------------------------+
+ * |  6  Nodes                    |  Count (green / red)
+ * | 15  Sensors                  |  Count (green / red)
+ * +------------------------------+
+ * |  * App    * WiFi             |  Green/Red dots (compact)
+ * +------------------------------+
+ * |  * REC  /  STANDBY           |  Recording status
+ * +------------------------------+
  ******************************************************************************/
 
 #include "DisplayManager.h"
@@ -522,6 +519,7 @@ DisplayManager::DisplayManager()
       _lastWebApp(-1),
       _lastWiFi(-1),
       _lastRecording(-1),
+      _lastTDMAState(-1),
       _lastFullRedraw(0)
 {
 }
@@ -923,7 +921,15 @@ void DisplayManager::showError(const char *message)
 }
 
 // ============================================================================
-// Status Page Update — 5 Gateway rows (called at ~4Hz from loop)
+// Status Page Update — TDMA-state-driven layout (called at ~4Hz from loop)
+// ============================================================================
+// Layout (172x320):
+//   [0-32]  Header bar: "MASH GW"
+//   [38-72] Row 0: TDMA state — prominent color-coded banner
+//   [84-108] Row 1: Node count
+//   [120-144] Row 2: Sensor count
+//   [156-180] Row 3: Web App + WiFi (compact)
+//   [192-216] Row 4: Recording
 // ============================================================================
 
 void DisplayManager::update(const DisplayStatus &s)
@@ -931,11 +937,6 @@ void DisplayManager::update(const DisplayStatus &s)
     if (!_initialized)
         return;
 
-    // V7-FIX: Was (_lastFullRedraw == 0) — only one full repaint ever.
-    // Display corruption from SPI glitches, EMI, or partial updates could
-    // never self-heal. Now we force a full redraw every 30s as well.
-    // 30s is long enough to avoid visible flicker during normal operation
-    // but short enough to recover from transient corruption.
     bool fullRedraw = (_lastFullRedraw == 0) ||
                       (millis() - _lastFullRedraw > 30000);
 
@@ -944,13 +945,13 @@ void DisplayManager::update(const DisplayStatus &s)
         _lastFullRedraw = millis();
         fillScreen(COLOR_BG);
 
-        // Header bar (height 32px)
+        // Header bar
         fillRect(0, 0, LCD_WIDTH, 32, COLOR_DARKBLUE);
-        // "MASH GW" size 3 = 126px, center = (172-126)/2 = 23
         drawString(23, 5, "MASH GW", COLOR_CYAN, COLOR_DARKBLUE, 3);
         drawHLine(0, 32, LCD_WIDTH, COLOR_CYAN);
 
         // Force all rows to repaint
+        _lastTDMAState = -1;
         _lastNodeCount = -1;
         _lastSensorCount = -1;
         _lastWebApp = -1;
@@ -958,83 +959,114 @@ void DisplayManager::update(const DisplayStatus &s)
         _lastRecording = -1;
     }
 
-    // 5 status rows: 320px tall, header 33px, 5 rows with ~54px spacing
-    const uint16_t ROW_Y[] = {46, 100, 154, 208, 262};
+    // Row 0: TDMA State — prominent color-coded banner
+    int8_t ts = (int8_t)s.tdmaState;
+    if (ts != _lastTDMAState || fullRedraw)
+    {
+        _lastTDMAState = ts;
+        // Full-width colored banner
+        uint16_t bannerColor;
+        const char *stateLabel;
+        uint16_t textColor = COLOR_WHITE;
+        switch (s.tdmaState)
+        {
+        case 0: // TDMA_STATE_IDLE
+            bannerColor = COLOR_DARKGRAY;
+            stateLabel = "IDLE";
+            break;
+        case 1: // TDMA_STATE_DISCOVERY
+            bannerColor = COLOR_BLUE;
+            stateLabel = "DISCOVERY";
+            break;
+        case 2: // TDMA_STATE_SYNC
+            bannerColor = COLOR_MAGENTA;
+            stateLabel = "SYNC";
+            break;
+        case 3: // TDMA_STATE_RUNNING
+            bannerColor = COLOR_GREEN;
+            stateLabel = "RUNNING";
+            textColor = COLOR_BLACK;
+            break;
+        default:
+            bannerColor = COLOR_RED;
+            stateLabel = "???";
+            break;
+        }
+        fillRect(0, 38, LCD_WIDTH, 30, bannerColor);
+        // Center the state label (size 3 = 18px/char)
+        uint16_t labelLen = strlen(stateLabel);
+        uint16_t labelX = (LCD_WIDTH - labelLen * 18) / 2;
+        drawString(labelX, 42, stateLabel, textColor, bannerColor, 3);
+    }
 
-    // Row 0: Nodes connected (count)
+    // Separator line
+    if (fullRedraw)
+    {
+        drawHLine(0, 72, LCD_WIDTH, COLOR_DARKGRAY);
+    }
+
+    // Row 1: Nodes connected
     int8_t nc = (int8_t)s.nodeCount;
     if (nc != _lastNodeCount || fullRedraw)
     {
         _lastNodeCount = nc;
-        fillRect(0, ROW_Y[0] - 4, LCD_WIDTH, 24, COLOR_BG);
+        fillRect(0, 80, LCD_WIDTH, 28, COLOR_BG);
 
         char countBuf[4];
         snprintf(countBuf, sizeof(countBuf), "%d", s.nodeCount);
         uint16_t numColor = (s.nodeCount > 0) ? COLOR_GREEN : COLOR_RED;
-        drawString(8, ROW_Y[0], countBuf, numColor, COLOR_BG, 2);
+        drawString(8, 84, countBuf, numColor, COLOR_BG, 3);
 
-        if (s.nodeCount == 1)
-        {
-            drawString(28, ROW_Y[0], "Node", COLOR_WHITE, COLOR_BG, 2);
-        }
-        else
-        {
-            drawString(28, ROW_Y[0], "Nodes", COLOR_WHITE, COLOR_BG, 2);
-        }
+        uint16_t textX = (s.nodeCount >= 10) ? 44 : 26;
+        drawString(textX, 88, (s.nodeCount == 1) ? " Node" : " Nodes",
+                   COLOR_WHITE, COLOR_BG, 2);
     }
 
-    // Row 1: Total sensor count
+    // Row 2: Total sensor count
     int8_t sc = (int8_t)s.sensorCount;
     if (sc != _lastSensorCount || fullRedraw)
     {
         _lastSensorCount = sc;
-        fillRect(0, ROW_Y[1] - 4, LCD_WIDTH, 24, COLOR_BG);
+        fillRect(0, 116, LCD_WIDTH, 28, COLOR_BG);
 
         char countBuf[4];
         snprintf(countBuf, sizeof(countBuf), "%d", s.sensorCount);
         uint16_t numColor = (s.sensorCount > 0) ? COLOR_GREEN : COLOR_RED;
-        drawString(8, ROW_Y[1], countBuf, numColor, COLOR_BG, 2);
+        drawString(8, 120, countBuf, numColor, COLOR_BG, 3);
 
-        if (s.sensorCount == 1)
-        {
-            drawString(28, ROW_Y[1], "Sensor", COLOR_WHITE, COLOR_BG, 2);
-        }
-        else
-        {
-            drawString(28, ROW_Y[1], "Sensors", COLOR_WHITE, COLOR_BG, 2);
-        }
+        uint16_t textX = (s.sensorCount >= 10) ? 44 : 26;
+        drawString(textX, 124, (s.sensorCount == 1) ? " Sensor" : " Sensors",
+                   COLOR_WHITE, COLOR_BG, 2);
     }
 
-    // Row 2: Web App connected
+    // Separator line
+    if (fullRedraw)
+    {
+        drawHLine(0, 150, LCD_WIDTH, COLOR_DARKGRAY);
+    }
+
+    // Row 3: Web App + WiFi (compact — two indicators side by side)
     int8_t wa = s.webAppConnected ? 1 : 0;
-    if (wa != _lastWebApp || fullRedraw)
+    int8_t wf = s.wifiConnected ? 1 : 0;
+    if (wa != _lastWebApp || wf != _lastWiFi || fullRedraw)
     {
         _lastWebApp = wa;
-        fillRect(0, ROW_Y[2] - 4, LCD_WIDTH, 24, COLOR_BG);
-        if (s.webAppConnected)
-        {
-            drawStatusRow(ROW_Y[2], COLOR_GREEN, "Web App", "OK", COLOR_GREEN);
-        }
-        else
-        {
-            drawStatusRow(ROW_Y[2], COLOR_RED, "Web App", "--", COLOR_GRAY);
-        }
+        _lastWiFi = wf;
+        fillRect(0, 156, LCD_WIDTH, 28, COLOR_BG);
+
+        // "App" indicator (left half)
+        fillRect(4, 162, 8, 8, s.webAppConnected ? COLOR_GREEN : COLOR_RED);
+        drawString(16, 160, "App", COLOR_WHITE, COLOR_BG, 2);
+
+        // "WiFi" indicator (right half)
+        fillRect(90, 162, 8, 8, s.wifiConnected ? COLOR_GREEN : COLOR_GRAY);
+        drawString(102, 160, "WiFi", COLOR_WHITE, COLOR_BG, 2);
     }
 
-    // Row 3: WiFi connected
-    int8_t wf = s.wifiConnected ? 1 : 0;
-    if (wf != _lastWiFi || fullRedraw)
+    // Separator line
+    if (fullRedraw)
     {
-        _lastWiFi = wf;
-        fillRect(0, ROW_Y[3] - 4, LCD_WIDTH, 24, COLOR_BG);
-        if (s.wifiConnected)
-        {
-            drawStatusRow(ROW_Y[3], COLOR_GREEN, "WiFi", "OK", COLOR_GREEN);
-        }
-        else
-        {
-            drawStatusRow(ROW_Y[3], COLOR_GRAY, "WiFi", "--", COLOR_GRAY);
-        }
+        drawHLine(0, 190, LCD_WIDTH, COLOR_DARKGRAY);
     }
 
     // Row 4: Recording
@@ -1042,14 +1074,17 @@ void DisplayManager::update(const DisplayStatus &s)
     if (rec != _lastRecording || fullRedraw)
     {
         _lastRecording = rec;
-        fillRect(0, ROW_Y[4] - 4, LCD_WIDTH, 24, COLOR_BG);
+        fillRect(0, 196, LCD_WIDTH, 28, COLOR_BG);
         if (s.recording)
         {
-            drawStatusRow(ROW_Y[4], COLOR_GREEN, "Rec", "", COLOR_GREEN);
+            // Prominent recording indicator
+            fillRect(4, 202, 8, 8, COLOR_RED);
+            drawString(16, 200, "REC", COLOR_RED, COLOR_BG, 3);
         }
         else
         {
-            drawStatusRow(ROW_Y[4], COLOR_GRAY, "Rec", "", COLOR_GRAY);
+            fillRect(4, 202, 8, 8, COLOR_DARKGRAY);
+            drawString(16, 200, "STANDBY", COLOR_GRAY, COLOR_BG, 2);
         }
     }
 }

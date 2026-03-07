@@ -1,5 +1,7 @@
 # TDMA Sensor Capacity Analysis & Optimization
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** `TDMADataPacket` (8-byte header) and `TDMADataPacketV2` have been removed. Current protocol uses `TDMANodeDataPacket` (10-byte header) with `TDMABatchedSensorData` at 17 bytes (quaternions removed). Capacity calculations should use these updated sizes.
+
 ## Executive Summary
 
 **Current Maximum**: ~24 total sensors across all nodes at 50Hz effective rate

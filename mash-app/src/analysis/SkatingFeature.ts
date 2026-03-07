@@ -92,7 +92,6 @@ export class SkatingFeature {
         const roll = Math.abs(Math.atan2(accel.x, accel.y) * (180 / Math.PI)); // Very rough proxy
 
         const lateralForce = Math.abs(accel.x); // Assuming X is Medial-Lateral in body frame
-        // const forwardForce = Math.abs(accel.z); // Unused for now
 
         const PUSH_THRESH = 1.5; // Gs
 

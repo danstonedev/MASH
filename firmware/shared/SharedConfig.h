@@ -38,16 +38,19 @@
 
 #include "BoardConfig.h"
 
-// I2C Multiplexer (TCA9548A)
+// I2C Multiplexer (TCA9548A) — DEPRECATED: No longer using multiplexers.
+// Kept for compile compatibility; probing is disabled.
 #define TCA9548A_ADDRESS 0x70
-#define PROBE_FOR_MULTIPLEXER true
+#define PROBE_FOR_MULTIPLEXER false
 #define USE_MULTIPLEXER PROBE_FOR_MULTIPLEXER
 
 // ============================================================================
 // Sensor Configuration
 // ============================================================================
 
-#define MAX_SENSORS 8
+// Max sensors per node via direct I2C (Wire@0x68/0x69 + Wire1@0x68/0x69 = 4).
+// No node currently has more than 3 physical sensors.
+#define MAX_SENSORS 4
 // DEPRECATED: Runtime code uses TDMA_MAX_NODES (= 8) from TDMAProtocol.h.
 // Kept at 8 for legacy test compatibility. Do NOT use in new code.
 #define MAX_NODES 8
@@ -251,22 +254,6 @@ struct Quaternion
 // ESP-NOW Packet Structures
 // ============================================================================
 
-struct __attribute__((packed)) CompressedSensorData
-{
-  uint8_t id;
-  int16_t q[4];
-  int16_t a[3];
-  int16_t g[3];
-};
-
-struct __attribute__((packed)) ESPNowDataPacket
-{
-  uint8_t type;
-  uint8_t count;
-  uint32_t timestamp;
-  CompressedSensorData sensors[MAX_SENSORS];
-};
-
 struct __attribute__((packed)) ESPNowEnviroPacket
 {
   uint8_t type;
@@ -285,7 +272,7 @@ struct __attribute__((packed)) ESPNowNodeInfoPacket
   uint8_t hasMag;
   uint8_t hasBaro;
   uint8_t useMux;
-  int8_t sensorChannels[8];
+  int8_t sensorChannels[MAX_SENSORS]; // EC-1: was hardcoded [8], now tracks MAX_SENSORS
 };
 
 // ============================================================================
@@ -342,6 +329,8 @@ struct __attribute__((packed)) ESPNowOTAAbortPacket
 #define RADIO_MODE_PACKET 0x06
 #define CMD_FORWARD_PACKET 0x08
 #define MAG_CALIB_PACKET 0x09
+#define POWER_DIAG_PACKET 0x0A
+#define TDMA_DIAG_PACKET 0x0B
 #define RADIO_MODE_BLE_OFF 0x00
 #define RADIO_MODE_BLE_ON 0x01
 
@@ -370,6 +359,33 @@ struct __attribute__((packed)) ESPNowMagCalibPacket
   float hardIronX, hardIronY, hardIronZ;
   float softIronScaleX, softIronScaleY, softIronScaleZ;
   uint16_t sampleCount;
+};
+
+// Node power diagnostics (one-shot on sync/recovery) for brownout visibility
+struct __attribute__((packed)) ESPNowPowerDiagPacket
+{
+  uint8_t type;
+  uint8_t nodeId;
+  uint8_t lastResetReason;
+  uint8_t recoveryActive;
+  uint32_t bootCount;
+  uint32_t brownoutCount;
+  uint32_t uptimeMs;
+};
+
+// Periodic node-side TDMA transport diagnostics for miss-rate analysis.
+struct __attribute__((packed)) ESPNowTDMADiagPacket
+{
+  uint8_t type;
+  uint8_t nodeId;
+  uint16_t intervalMs;
+  uint16_t txAttempts;
+  uint16_t txSuccess;
+  uint16_t txFail;
+  uint16_t txStallClears;
+  uint16_t staleIncompleteDrops;
+  uint8_t maxQueueDepth;
+  uint32_t currentFrame;
 };
 
 #define CMD_MAG_CALIBRATE 0x50

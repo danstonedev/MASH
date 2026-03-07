@@ -64,21 +64,29 @@ export function LateJoinBanner() {
 
   return (
     <div className="space-y-2">
-      {/* Header with "Add All" when multiple */}
-      {nodesWithAge.length > 1 && (
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs font-medium text-text-secondary flex items-center gap-1">
-            <Users className="h-3.5 w-3.5" />
-            {nodesWithAge.length} nodes waiting
-          </span>
-          <button
-            onClick={acceptAllPendingNodes}
-            className="text-xs text-accent hover:text-accent/80 font-medium transition-colors"
-          >
-            Add All &amp; Re-sync
-          </button>
+      <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-medium text-text-primary flex items-center gap-1">
+              <Users className="h-3.5 w-3.5 text-warning" />
+              {nodesWithAge.length} late-joining node
+              {nodesWithAge.length === 1 ? "" : "s"}
+            </div>
+            <div className="text-[11px] text-text-secondary mt-1">
+              Discovery is already locked. Add these nodes and re-sync before
+              calibration, or ignore them to keep the current topology.
+            </div>
+          </div>
+          {nodesWithAge.length > 1 && (
+            <button
+              onClick={acceptAllPendingNodes}
+              className="text-xs text-accent hover:text-accent/80 font-medium transition-colors shrink-0"
+            >
+              Add All &amp; Re-sync
+            </button>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Individual node cards */}
       {nodesWithAge.map((node) => (
@@ -111,15 +119,15 @@ export function LateJoinBanner() {
                   "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                   "bg-accent text-bg-surface hover:bg-accent/90",
                 )}
-                title="Accept node and re-sync"
+                title="Accept node and re-sync before calibration"
               >
                 <Plus className="h-3 w-3" />
-                Add
+                Add &amp; Re-sync
               </button>
               <button
                 onClick={() => handleReject(node.nodeId)}
                 className="p-1 rounded-md hover:bg-bg-elevated text-text-secondary hover:text-text-primary transition-colors"
-                title="Ignore this node"
+                title="Ignore this node and continue with current topology"
               >
                 <X className="h-3.5 w-3.5" />
               </button>

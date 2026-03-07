@@ -1,5 +1,7 @@
 # 🚀 IMU Connect System Optimization Master Plan
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** Delta compression (Section 6), `TDMADataPacketV3`, `TDMA_PACKET_DATA_V3` (0x24), and related V3 structures were never implemented and have been removed from the codebase. All nodes use `TDMANodeDataPacket` (0x26) with keyframe-only data. See `TDMAProtocol.h` for current definitions.
+
 **Version:** 1.0  
 **Date:** February 3, 2026  
 **Status:** PLANNING PHASE

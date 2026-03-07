@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SerialConnection } from "./SerialConnection";
+import type { IMUDataPacket } from "../protocol/DeviceInterface";
 
 function makeFrame(type = 0x06): Uint8Array {
   if (type === 0x06) {
@@ -40,5 +41,60 @@ describe("SerialConnection queue safety", () => {
 
     expect(flowSpy).toHaveBeenCalledWith(true);
   });
-});
 
+  it("enriches IMU packets with the last sync_status completeness contract", () => {
+    const conn = new SerialConnection() as unknown as {
+      dispatchParsedPackets: (packets: unknown[], deviceName: string) => void;
+      onData: (callback: (data: unknown) => void) => void;
+    };
+
+    let lastPayload: unknown;
+    conn.onData((data) => {
+      lastPayload = data;
+    });
+
+    conn.dispatchParsedPackets(
+      [
+        {
+          type: "sync_status",
+          syncBuffer: {
+            expectedSensors: 12,
+            authoritativeExpectedSensors: 12,
+            activeStreamingSensors: 10,
+          },
+        },
+        {
+          sensorId: 1,
+          timestamp: 0,
+          timestampUs: 0,
+          frameNumber: 1,
+          quaternion: [1, 0, 0, 0],
+          accelerometer: [0, 0, 1],
+          gyro: [0, 0, 0],
+          battery: 100,
+          format: "0x25-sync",
+          rawNodeId: 11,
+          localSensorIndex: 0,
+          frameCompleteness: {
+            validCount: 10,
+            expectedCount: 10,
+            isComplete: true,
+          },
+        } satisfies IMUDataPacket,
+      ],
+      "USB Serial",
+    );
+
+    const forwarded = lastPayload as Array<
+      IMUDataPacket & { deviceId: string }
+    >;
+    expect(Array.isArray(forwarded)).toBe(true);
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0].frameCompleteness).toMatchObject({
+      validCount: 10,
+      expectedCount: 10,
+      authoritativeExpectedCount: 12,
+      activeStreamingCount: 10,
+    });
+  });
+});

@@ -1,24 +1,25 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Debug artifacts & logs
+# (Common patterns like node_modules, dist, .vscode/*, .idea, .DS_Store,
+#  *.suo, *.ntvs*, *.njsproj, *.sln, *.sw?, and log patterns are already
+#  covered by the root .gitignore)
+error_log*.txt
+deploy_failure_log*.txt
+build_output.txt
+final_error_log.txt
+debug-capture.json
+calib-test-output.txt
+test-out.txt
+test-output.txt
+test-json.txt
+test-results.txt
+foot-test.txt
+tsc_errors.txt
+validation_results.txt
+verify_output.txt
+vite_error.txt
+run_*.log
+.vite-dev.stderr.log
+.vite-dev.stdout.log
+verify_firmware_check.js
+playwright-report/
+test-results/

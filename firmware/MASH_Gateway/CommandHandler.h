@@ -48,6 +48,7 @@ typedef std::function<void(JsonDocument &)> SyncStatusCallback;
 typedef std::function<void(bool)> DiscoveryLockCallback;
 typedef std::function<bool(uint8_t)> AcceptRejectNodeCallback;
 typedef std::function<void(JsonDocument &)> PendingNodesCallback;
+typedef std::function<void(uint8_t)> ExpectedNodesCallback;
 
 class CommandHandler
 {
@@ -127,6 +128,14 @@ public:
   {
     pendingNodesCallback = cb;
   }
+  void setExpectedNodesCallback(ExpectedNodesCallback cb)
+  {
+    expectedNodesCallback = cb;
+  }
+  void setClearTopologyCallback(VoidCallback cb)
+  {
+    clearTopologyCallback = cb;
+  }
 
 private:
   VoidCallback startCallback;
@@ -161,6 +170,8 @@ private:
   AcceptRejectNodeCallback acceptNodeCallback;
   AcceptRejectNodeCallback rejectNodeCallback;
   PendingNodesCallback pendingNodesCallback;
+  ExpectedNodesCallback expectedNodesCallback;
+  VoidCallback clearTopologyCallback;
 
   String successResponse(const char *message);
   String errorResponse(const char *message);

@@ -204,7 +204,7 @@ export class CoGTracker {
       swayAngle,
       swayArea: area,
       swayPath: pathLength,
-      meanFrequency: 0, // TODO: implement FFT for frequency
+      meanFrequency: 0, // Known gap: FFT-based mean frequency requires fft.js or similar library
     };
 
     this.lastState = state;

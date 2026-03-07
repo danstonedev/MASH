@@ -5,6 +5,7 @@ export interface PreparePlaybackSessionInput {
   sessionStartTime: number;
   sessionEndTime?: number;
   defaultFrameRate?: number;
+  recordedSampleRate?: number;
 }
 
 export interface PackedSensorTimeline {
@@ -32,6 +33,7 @@ export function preparePlaybackSession(
     sessionStartTime,
     sessionEndTime,
     defaultFrameRate = 60,
+    recordedSampleRate,
   } = input;
 
   const copiedFrames = frames.slice();
@@ -48,6 +50,35 @@ export function preparePlaybackSession(
     groupedFramesBySensor[key].push(frame);
   }
 
+  // =========================================================================
+  // TIMESTAMP STRATEGY: prefer frame-number-derived timestamps (5ms spacing)
+  // =========================================================================
+  // The recording store already writes:
+  //   frame.timestamp = epochBaseWallClock + (frameNumber - epochBaseFN) * 5
+  // These are clean 5ms-spaced timestamps anchored to the gateway's 200Hz
+  // TDMA clock. We normalise them so the session starts at t=0 and derive
+  // duration from the frame-number span — no wall-clock jitter.
+  //
+  // Fallback: if frames lack frame numbers, use systemTime (wall-clock).
+  // =========================================================================
+
+  // Detect whether frames carry valid frame numbers
+  let minFrameNumber = Infinity;
+  let maxFrameNumber = -Infinity;
+  for (const frame of copiedFrames) {
+    if (
+      typeof frame.frameNumber === "number" &&
+      Number.isFinite(frame.frameNumber)
+    ) {
+      if (frame.frameNumber < minFrameNumber)
+        minFrameNumber = frame.frameNumber;
+      if (frame.frameNumber > maxFrameNumber)
+        maxFrameNumber = frame.frameNumber;
+    }
+  }
+  const hasFrameNumberSpan =
+    minFrameNumber < Infinity && maxFrameNumber > minFrameNumber;
+
   let minSystemTime = Infinity;
   let maxSystemTime = -Infinity;
   for (const frame of copiedFrames) {
@@ -59,26 +90,39 @@ export function preparePlaybackSession(
       if (frame.systemTime > maxSystemTime) maxSystemTime = frame.systemTime;
     }
   }
-
   const hasSystemTimeSpan =
     minSystemTime < Infinity && maxSystemTime > minSystemTime;
-  const frameWallClockMs = hasSystemTimeSpan
-    ? maxSystemTime - minSystemTime
-    : 0;
-
-  const firstTimestamp = copiedFrames[0]?.timestamp ?? 0;
-  const lastTimestamp = copiedFrames[copiedFrames.length - 1]?.timestamp ?? 0;
-  const frameTimestampSpan = lastTimestamp - firstTimestamp;
 
   const sessionWallClockMs =
     typeof sessionEndTime === "number" && sessionEndTime > sessionStartTime
       ? sessionEndTime - sessionStartTime
       : 0;
 
+  const FRAME_PERIOD_MS = 5; // 200Hz gateway clock
   let duration = 0;
-  if (hasSystemTimeSpan) {
-    duration = frameWallClockMs;
 
+  if (hasFrameNumberSpan) {
+    // Best path: derive duration and per-frame timestamps from frame numbers.
+    // This gives perfectly uniform 5ms spacing with zero jitter.
+    const frameSpan = maxFrameNumber - minFrameNumber;
+    duration = frameSpan * FRAME_PERIOD_MS;
+
+    // Normalise each frame's timestamp to session-relative milliseconds.
+    // Frames already carry epoch-aware timestamps from the recording store,
+    // but we re-derive from frameNumber to guarantee zero drift and to
+    // handle legacy sessions where timestamps might have been overwritten.
+    for (const frame of copiedFrames) {
+      if (
+        typeof frame.frameNumber === "number" &&
+        Number.isFinite(frame.frameNumber)
+      ) {
+        frame.timestamp =
+          (frame.frameNumber - minFrameNumber) * FRAME_PERIOD_MS;
+      }
+    }
+  } else if (hasSystemTimeSpan) {
+    // Fallback: no frame numbers — use wall-clock systemTime.
+    duration = maxSystemTime - minSystemTime;
     const baseSystemTime = minSystemTime;
     for (const frame of copiedFrames) {
       if (
@@ -91,7 +135,10 @@ export function preparePlaybackSession(
   } else if (sessionWallClockMs > 0) {
     duration = sessionWallClockMs;
   } else {
-    duration = frameTimestampSpan > 0 ? frameTimestampSpan : 0;
+    const firstTimestamp = copiedFrames[0]?.timestamp ?? 0;
+    const lastTimestamp = copiedFrames[copiedFrames.length - 1]?.timestamp ?? 0;
+    duration =
+      lastTimestamp > firstTimestamp ? lastTimestamp - firstTimestamp : 0;
   }
 
   for (const key of Object.keys(groupedFramesBySensor)) {
@@ -160,7 +207,11 @@ export function preparePlaybackSession(
   }
 
   let frameRate = defaultFrameRate;
-  if (duration > 100 && sensorSet.size > 0) {
+  const packetLocalTransport = copiedFrames.some((frame) => {
+    const expectedCount = Number(frame.frameCompleteness?.expectedCount ?? 0);
+    return expectedCount > 0 && expectedCount < sensorSet.size;
+  });
+  if (duration > 0 && sensorSet.size > 0) {
     const durationSec = duration / 1000;
     let bestUniqueFrameNumbers = 0;
 
@@ -180,7 +231,14 @@ export function preparePlaybackSession(
       }
     }
 
-    if (bestUniqueFrameNumbers >= 2) {
+    if (
+      packetLocalTransport &&
+      typeof recordedSampleRate === "number" &&
+      Number.isFinite(recordedSampleRate) &&
+      recordedSampleRate > 0
+    ) {
+      frameRate = Math.round(recordedSampleRate);
+    } else if (bestUniqueFrameNumbers >= 2) {
       frameRate = Math.round((bestUniqueFrameNumbers - 1) / durationSec);
     } else {
       let maxSensorFrames = 0;

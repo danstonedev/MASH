@@ -8,8 +8,8 @@ TDMA_BEACON_DURATION_US = 500
 TDMA_FIRST_SLOT_GAP_US = 500
 TDMA_GUARD_TIME_US = 2000
 TDMA_SLOT_MIN_WIDTH_US = 2500
-TDMA_SENSOR_DATA_SIZE = 25
-TDMA_DATA_HEADER_SIZE = 8
+TDMA_SENSOR_DATA_SIZE = 17
+TDMA_NODE_DATA_HEADER_SIZE = 10
 TDMA_SAMPLES_PER_FRAME = 4
 
 # Pipelined architecture: slot = fixed overhead + RF airtime (no I2C)
@@ -48,7 +48,7 @@ def calculate_slot_width(sensor_count: int) -> int:
         return 0
 
     payload_bytes = (
-        TDMA_DATA_HEADER_SIZE
+        TDMA_NODE_DATA_HEADER_SIZE
         + (TDMA_SAMPLES_PER_FRAME * sensor_count * TDMA_SENSOR_DATA_SIZE)
         + 1
     )

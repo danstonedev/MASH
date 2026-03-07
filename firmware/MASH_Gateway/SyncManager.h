@@ -24,16 +24,13 @@ struct SyncPacket
 // Forward declaration
 class SensorManager;
 
-// Callback type for receiving IMU data (Gateway mode)
-typedef std::function<void(const ESPNowDataPacket &packet)> DataRecvCallback;
-
 // Callback type for when a new node registers (Gateway mode)
 typedef std::function<void(uint8_t nodeId, uint8_t sensorCount)>
     NodeRegisteredCallback;
 
 // Callback type for when inactive nodes are pruned (Gateway mode)
-// Called once per prune cycle if any nodes were removed
-typedef std::function<void()> NodePrunedCallback;
+// Called once per prune cycle with list of pruned nodeIds (for webapp notification)
+typedef std::function<void(const uint8_t *prunedNodeIds, uint8_t prunedCount)> NodePrunedCallback;
 
 // ============================================================================
 // TDMA Node Registration Info (tracked by Gateway)
@@ -47,7 +44,8 @@ struct TDMANodeInfo
   char nodeName[16];           // Human-readable name
   uint16_t slotOffsetUs;       // Assigned slot offset from beacon
   uint16_t slotWidthUs;        // Assigned slot width
-  uint32_t lastHeard;          // millis() when last heard from
+  uint32_t lastHeard;          // millis() when last heard from (ANY packet type)
+  uint32_t lastDataReceivedMs; // millis() when last DATA packet received (not registration)
   bool registered;             // Is this slot active?
   uint8_t mac[6];              // MAC address for collision detection
   uint32_t lastScheduleSentMs; // V4-FIX: Per-node schedule resend rate limiting
@@ -66,12 +64,6 @@ public:
 
   void setRole(SyncRole role);
   SyncRole getRole() const { return currentRole; }
-
-  // Send IMU data (Node mode) - Packs data from SensorManager
-  void sendIMUData(SensorManager &sm);
-
-  // Send Environmental data (Node mode)
-  void sendEnviroData(SensorManager &sm);
 
   // Send Node Info / Topology (Node mode)
   void sendNodeInfo(SensorManager &sm, const char *name);
@@ -122,6 +114,12 @@ public:
   // and restarts the discovery phase. Use for manual user-initiated re-scans.
   void restartDiscovery();
 
+  // Set the expected number of nodes for early discovery exit.
+  // When this many nodes register, discovery ends immediately.
+  // Set to 0 to disable early-exit (wait for full timeout).
+  void setExpectedNodeCount(uint8_t count);
+  uint8_t getExpectedNodeCount() const { return expectedNodeCount; }
+
   // Check if TDMA is currently active (not IDLE)
   bool isTDMAActive() const { return tdmaState != TDMA_STATE_IDLE; }
 
@@ -138,9 +136,14 @@ public:
   uint8_t getActiveNodeCount(uint32_t activeThresholdMs = 3000) const;
   uint8_t getActiveSensorCount(uint32_t activeThresholdMs = 3000) const;
 
+  // Get number of nodes that have sent actual DATA (not just registration)
+  uint8_t getSyncedNodeCount(uint32_t activeThresholdMs = 5000) const;
+  uint8_t getSyncedSensorCount(uint32_t activeThresholdMs = 5000) const;
+
   // Update lastHeard time for a node (called when TDMA data received)
   void updateNodeLastHeard(uint8_t nodeId);
   void updateNodeLastHeardByMAC(const uint8_t *mac);
+  void updateNodeLastDataByMAC(const uint8_t *mac);
 
   // Get TDMA state for diagnostics
   TDMAState getTDMAState() const { return tdmaState; }
@@ -188,6 +191,7 @@ public:
   void saveTopologyToNVS();
   void loadTopologyFromNVS();
   void clearPersistedTopology();
+  void clearNVSIfFirmwareChanged();
   uint8_t getPreRegisteredNodeCount() const { return preRegisteredNodeCount; }
 
   // ============================================================================
@@ -251,22 +255,28 @@ private:
   volatile uint8_t syncResetBeaconsRemaining; // Number of beacons to broadcast
                                               // SYNC_RESET (0=none)
   volatile bool
-      syncResetFrameNumberPending; // Reset frame number on next beacon (atomic)
-  uint8_t syncPhaseCount;          // Counter for sync phase iterations
+      syncResetFrameNumberPending;         // Reset frame number on next beacon (atomic)
+  uint8_t syncPhaseCount;                  // Counter for sync phase iterations
+  uint32_t lastRegistrationReceivedMs = 0; // OPT-3: Tracks last registration for adaptive SYNC exit
   TDMANodeInfo registeredNodes[TDMA_MAX_NODES];
   uint8_t nodeCount;
+  // EC-2: Spinlock protecting registeredNodes[] reads in getCompactSensorId/
+  // getExpectedSensorIds (called from Core 1 DataIngestionTask) against
+  // concurrent writes from handleNodeRegistration (Core 0).
+  mutable portMUX_TYPE _registeredNodesLock = portMUX_INITIALIZER_UNLOCKED;
 
-  // FIX #4: EXTEND DISCOVERY DURATION
-  // Discovery phase duration (collect registrations before starting)
-  // Extended from 3s to 10s to allow Nodes to complete full channel scan
-  // Rationale: Nodes scan 11 channels @ 500ms each = 5.5s minimum
-  // 10s provides margin for RF propagation delays and retransmissions
-  static const uint32_t DISCOVERY_DURATION_MS = 10000; // Was: 3000
-  static const uint32_t SHORT_DISCOVERY_MS =
-      8000;                       // V3-FIX: Was 3000 — too short for 6-node boot.
-                                  // Nodes scan 11 ch × 500ms = 5.5s minimum.
-                                  // 8s gives margin for RF delays + retransmissions.
-  uint8_t preRegisteredNodeCount; // OPP-8: count loaded from NVS
+  // ====================================================================
+  // DISCOVERY TIMING CONSTANTS
+  // ====================================================================
+  // Node channel scan: 11 channels × 500ms = 5.5s worst case.
+  // With 6 nodes + ESP-NOW collision retries, worst case is ~15s.
+  // 30s max timeout ensures even slow-booting nodes are captured.
+  // Early-exit: If expectedNodeCount nodes register, we skip the timeout.
+  // ====================================================================
+  static const uint32_t DISCOVERY_DURATION_MS = 30000; // Max timeout for cold boot
+  static const uint32_t SHORT_DISCOVERY_MS = 15000;    // NVS warm boot timeout
+  uint8_t preRegisteredNodeCount;                      // OPP-8: count loaded from NVS
+  uint8_t expectedNodeCount;                           // User-configured expected nodes (0=disabled)
 
   // ============================================================================
   // TDMA Helper Functions
@@ -283,6 +293,7 @@ private:
 
   // Discovery lock state
   bool discoveryLocked = false;
+  volatile bool pendingSaveTopology = false; // Deferred NVS write flag
   PendingNode pendingNodes[MAX_PENDING_NODES];
   uint8_t sessionKnownMACs[TDMA_MAX_NODES][6];
   uint8_t sessionKnownMACCount = 0;

@@ -112,7 +112,7 @@ function createLogger(prefix: string) {
 
 // Pre-configured loggers for common modules
 export const log = createLogger("App");
-export const bleLog = createLogger("BLE");
+export const serialLog = createLogger("Serial");
 export const vqfLog = createLogger("VQF");
 export const tareLog = createLogger("Tare");
 export const calibLog = createLogger("Calib");

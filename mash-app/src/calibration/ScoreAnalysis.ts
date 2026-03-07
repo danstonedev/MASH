@@ -74,7 +74,6 @@ export function estimateJointCenter(input: SCoREInput): SCoREResult | null {
 
   // Validate inputs
   if (proximalPositions.length < 10 || distalPositions.length < 10) {
-    // console.debug('[SCoRE] Insufficient data points (need at least 10 frames)');
     return null;
   }
 

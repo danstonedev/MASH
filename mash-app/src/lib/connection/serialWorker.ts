@@ -36,6 +36,34 @@ const MAX_FRAME_LEN = 4096;
 const MIN_FRAME_LEN = 3;
 const MAX_RESYNC_ATTEMPTS = 128;
 
+function isPlausibleFrame(packetType: number, frameLen: number): boolean {
+  // 0x25 sync frame: header(10) + N*16 sensor slots [+ optional CRC byte]
+  if (packetType === 0x25) {
+    const minLen = 10 + 16; // one sensor
+    const maxLen = 10 + 32 * 16 + 1; // bounded by parser's max reasonable sensors
+    if (frameLen < minLen || frameLen > maxLen) return false;
+    const payload = frameLen - 10;
+    return payload % 16 === 0 || payload % 16 === 1;
+  }
+
+  // 0x05 node info: legacy 37 bytes or extended 46 bytes
+  if (packetType === 0x05) {
+    return frameLen === 37 || frameLen === 46;
+  }
+
+  // 0x04 environmental packet is fixed-size
+  if (packetType === 0x04) {
+    return frameLen === 31;
+  }
+
+  // 0x06 JSON packet is variable length, but must include at least type+1 byte
+  if (packetType === 0x06) {
+    return frameLen >= 2 && frameLen <= MAX_FRAME_LEN;
+  }
+
+  return false;
+}
+
 function handleChunk(chunk: Uint8Array): WorkerOutbound {
   ringBuffer.write(chunk);
   const overflow = ringBuffer.drainOverflowStats();
@@ -66,12 +94,7 @@ function handleChunk(chunk: Uint8Array): WorkerOutbound {
     if (ringBuffer.length < 2 + frameLen) break;
 
     const packetType = ringBuffer.peekByte(2);
-    if (
-      packetType !== 0x04 &&
-      packetType !== 0x05 &&
-      packetType !== 0x06 &&
-      packetType !== 0x25
-    ) {
+    if (!isPlausibleFrame(packetType, frameLen)) {
       // Unknown type is typically raw serial log/noise; resync byte-wise.
       resyncAttempts++;
       if (resyncAttempts > MAX_RESYNC_ATTEMPTS) {
@@ -148,7 +171,7 @@ function extractSyncFrameMeta(frame: Uint8Array): {
   const frameNumber = view.getUint32(1, true);
   const timestampUs = view.getUint32(5, true);
   const sensorCountHeader = view.getUint8(9);
-  const sensorSize = 24;
+  const sensorSize = 16;
   const headerSize = 10;
 
   // =========================================================================
@@ -187,7 +210,7 @@ function extractSyncFrameMeta(frame: Uint8Array): {
   for (let s = 0; s < sensorCount; s++) {
     const offset = headerSize + s * sensorSize;
     const sensorId = view.getUint8(offset);
-    const flags = view.getUint8(offset + 21);
+    const flags = view.getUint8(offset + 13);
     const isValid = (flags & 0x01) !== 0;
 
     // PIPELINE FIX: Removed duplicate quaternion magnitude check.

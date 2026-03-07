@@ -133,11 +133,15 @@ export class SessionAnalyzer {
     const primarySensorId = this.findPrimarySensor(sensorFrames);
     const primaryFrames = sensorFrames.get(primarySensorId) || frames;
 
-    // Calculate sample rate
+    // Calculate sample rate for the activity-analysis stream.
     const totalDuration =
       primaryFrames[primaryFrames.length - 1].timestamp -
       primaryFrames[0].timestamp;
     const averageSampleRate = primaryFrames.length / (totalDuration / 1000);
+
+    // Data quality should reflect the whole synchronized recording, not just
+    // whichever sensor has the longest stream.
+    const dataQuality = this.computeDataQuality(sensorFrames);
 
     // Run activity detection (with sensor context)
     const { segments, features } = this.detectActivities(
@@ -186,12 +190,9 @@ export class SessionAnalyzer {
       averageCadence: Math.round(averageCadence),
 
       dataQuality: {
-        missingFrames: this.countMissingFrames(
-          primaryFrames,
-          averageSampleRate,
-        ),
+        missingFrames: dataQuality.missingFrames,
         sensorCount,
-        averageSampleRate: Math.round(averageSampleRate * 10) / 10,
+        averageSampleRate: dataQuality.averageSampleRate,
       },
 
       rawFeatures: features,
@@ -230,6 +231,43 @@ export class SessionAnalyzer {
       }
     });
     return primaryId;
+  }
+
+  /**
+   * Summarize recording quality across all sensors instead of a single stream.
+   */
+  private computeDataQuality(sensorFrames: Map<number, RecordedFrame[]>): {
+    missingFrames: number;
+    averageSampleRate: number;
+  } {
+    let missingFrames = 0;
+    const sampleRates: number[] = [];
+
+    sensorFrames.forEach((frames) => {
+      if (frames.length < 2) {
+        return;
+      }
+
+      const durationMs =
+        frames[frames.length - 1].timestamp - frames[0].timestamp;
+      if (durationMs <= 0) {
+        return;
+      }
+
+      const sampleRate = frames.length / (durationMs / 1000);
+      sampleRates.push(sampleRate);
+      missingFrames += this.countMissingFrames(frames, sampleRate);
+    });
+
+    const averageSampleRate =
+      sampleRates.length > 0
+        ? sampleRates.reduce((sum, rate) => sum + rate, 0) / sampleRates.length
+        : 0;
+
+    return {
+      missingFrames,
+      averageSampleRate: Math.round(averageSampleRate * 10) / 10,
+    };
   }
 
   /**

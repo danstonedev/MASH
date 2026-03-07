@@ -11,11 +11,6 @@
 #include "SensorManager.h"
 #include "TimingGlobals.h"
 
-static constexpr int16_t UNITY_QUAT_W_I16 = 16384;
-static constexpr int16_t UNITY_QUAT_X_I16 = 0;
-static constexpr int16_t UNITY_QUAT_Y_I16 = 0;
-static constexpr int16_t UNITY_QUAT_Z_I16 = 0;
-
 // ============================================================================
 // BUFFER SAMPLE — Store IMU data into the deterministic frame queue
 // ============================================================================
@@ -362,12 +357,6 @@ bool SyncManager::bufferSample(SensorManager &sm)
 
         entry->samples[sampleIndex][i].sensorId = i + nodeId;
         entry->samples[sampleIndex][i].timestampUs = syncedTimestampUs;
-        // Node-side fusion was removed; web app performs orientation fusion.
-        // Keep protocol-compatible unit quaternion in payload.
-        entry->samples[sampleIndex][i].q[0] = UNITY_QUAT_W_I16;
-        entry->samples[sampleIndex][i].q[1] = UNITY_QUAT_X_I16;
-        entry->samples[sampleIndex][i].q[2] = UNITY_QUAT_Y_I16;
-        entry->samples[sampleIndex][i].q[3] = UNITY_QUAT_Z_I16;
         entry->samples[sampleIndex][i].a[0] = (int16_t)(data.accelX * 100.0f);
         entry->samples[sampleIndex][i].a[1] = (int16_t)(data.accelY * 100.0f);
         entry->samples[sampleIndex][i].a[2] = (int16_t)(data.accelZ * 100.0f);
@@ -384,7 +373,7 @@ bool SyncManager::bufferSample(SensorManager &sm)
             uint8_t *bytes = (uint8_t *)sample;
             Serial.printf("[TDMA BYTES] sensorId=%d a[]=(%d,%d,%d) bytes: ",
                           sample->sensorId, sample->a[0], sample->a[1], sample->a[2]);
-            for (int b = 0; b < 25; b++)
+            for (int b = 0; b < (int)sizeof(TDMABatchedSensorData); b++)
             {
                 Serial.printf("%02X ", bytes[b]);
             }
@@ -472,8 +461,7 @@ bool SyncManager::isInTransmitWindow() const
 size_t buildTDMAPacket(uint8_t *packet,
                        const TDMABatchedSensorData (*frameSamples)[MAX_SENSORS],
                        uint8_t frameSampleCount, uint8_t sensorCount,
-                       uint32_t frameNumber, TDMABatchedSensorData *prevSample,
-                       bool &prevSampleValid, uint32_t &deltaOverflowCount,
+                       uint32_t frameNumber,
                        uint8_t nodeId, uint8_t syncProtocolVersion,
                        uint16_t lastRttUs, uint32_t timeSinceLastSync,
                        bool twoWaySyncActive, uint8_t &samplesConsumed)
@@ -498,16 +486,16 @@ size_t buildTDMAPacket(uint8_t *packet,
     }
 
     // Build packet header
-    TDMANodeDeltaPacket *header = (TDMANodeDeltaPacket *)packet;
-    header->type = TDMA_PACKET_DATA_DELTA;
+    TDMANodeDataPacket *header = (TDMANodeDataPacket *)packet;
+    header->type = TDMA_PACKET_NODE_DATA;
     header->nodeId = nodeId;
     header->frameNumber = frameNumber;
     header->sampleCount = samplesToSend;
     header->sensorCount = sensorCount;
     header->reserved = 0;
-    header->flags = NODE_DELTA_FLAG_ALL_KEYFRAME;
+    header->flags = NODE_DATA_FLAG_KEYFRAME;
 
-    size_t destOffset = sizeof(TDMANodeDeltaPacket);
+    size_t destOffset = sizeof(TDMANodeDataPacket);
 
     // All samples packed as keyframes (no delta encoding)
     for (uint8_t s = 0; s < samplesToSend; s++)
@@ -523,7 +511,7 @@ size_t buildTDMAPacket(uint8_t *packet,
     // Sync quality metadata
     if (syncProtocolVersion == SYNC_PROTOCOL_VERSION_PTP_V2)
     {
-        header->flags |= NODE_DELTA_FLAG_SYNC_V2;
+        header->flags |= NODE_DATA_FLAG_SYNC_V2;
         SyncQualityFlags *syncQuality = (SyncQualityFlags *)(packet + destOffset);
 
         syncQuality->lastSyncAgeMs =
@@ -562,8 +550,6 @@ size_t buildTDMAPacket(uint8_t *packet,
     uint8_t crc = calculateCRC8(packet, destOffset);
     packet[destOffset] = crc;
     destOffset++;
-
-    // (prevSample tracking removed — delta compression disabled)
 
     samplesConsumed = samplesToSend;
     return destOffset;
@@ -605,6 +591,8 @@ void SyncManager::sendTDMAData()
             txPending = false;
             g_txStartTime = 0;
             sendFailCount++;
+            tdmaDiagTxFail++;
+            tdmaDiagTxStallClears++;
             portEXIT_CRITICAL(&syncStateLock);
             static uint32_t lastStallLog = 0;
             if (millis() - lastStallLog > 2000)
@@ -642,7 +630,18 @@ void SyncManager::sendTDMAData()
         return;
     }
 
+    if (frameQueueCount > 0)
+    {
+        portENTER_CRITICAL(&syncStateLock);
+        if (frameQueueCount > tdmaDiagMaxQueueDepth)
+        {
+            tdmaDiagMaxQueueDepth = frameQueueCount;
+        }
+        portEXIT_CRITICAL(&syncStateLock);
+    }
+
     // Drop stale incomplete frames in LIVE mode so they don't block the queue.
+    uint16_t staleDropsThisCall = 0;
     while (frameQueueCount > 0)
     {
         uint8_t idx = frameQueueTail;
@@ -662,6 +661,7 @@ void SyncManager::sendTDMAData()
             frameQueue[idx].frameNumber + 1 < capturedCurrentFrame)
         {
             droppedStaleIncompleteFrames++;
+            staleDropsThisCall++;
             frameQueueTail =
                 (uint8_t)((frameQueueTail + 1) % TDMA_FRAME_QUEUE_CAPACITY);
             frameQueueCount--;
@@ -671,6 +671,14 @@ void SyncManager::sendTDMAData()
     }
 
     xSemaphoreGive(bufferMutex);
+
+    if (staleDropsThisCall > 0)
+    {
+        portENTER_CRITICAL(&syncStateLock);
+        tdmaDiagStaleIncompleteDrops =
+            (uint16_t)(tdmaDiagStaleIncompleteDrops + staleDropsThisCall);
+        portEXIT_CRITICAL(&syncStateLock);
+    }
 
     if (!haveFrame)
     {
@@ -689,8 +697,8 @@ void SyncManager::sendTDMAData()
     uint32_t tBuildStart = micros();
     size_t packetSize = buildTDMAPacket(
         pipelinePacket, frameToSend.samples, TDMA_SAMPLES_PER_FRAME,
-        frameToSend.sensorCount, frameToSend.frameNumber, prevSample,
-        prevSampleValid, deltaOverflowCount, nodeId, syncProtocolVersion,
+        frameToSend.sensorCount, frameToSend.frameNumber,
+        nodeId, syncProtocolVersion,
         lastRttUs, getTimeSinceLastSync(), isTwoWaySyncActive(), samplesConsumed);
     uint32_t tBuild = micros() - tBuildStart;
     if (tBuild > g_packetBuildTimeMax)
@@ -702,6 +710,7 @@ void SyncManager::sendTDMAData()
     }
 
     portENTER_CRITICAL(&syncStateLock);
+    tdmaDiagTxAttempts++;
     txPending = true;
     g_txStartTime = micros();
     portEXIT_CRITICAL(&syncStateLock);
@@ -717,6 +726,7 @@ void SyncManager::sendTDMAData()
         sendFailCount++;
         consecutiveSendFailures++; // EXPERT REVIEW FIX: Track synchronous failures
                                    // too
+        tdmaDiagTxFail++;
         portEXIT_CRITICAL(&syncStateLock);
         static uint32_t lastSendErrLog = 0;
         if (millis() - lastSendErrLog > 2000)
@@ -729,12 +739,11 @@ void SyncManager::sendTDMAData()
 
     // Log stats periodically
     static uint32_t lastTxLog = 0;
-    if (millis() - lastTxLog > 5000 &&
-        (sendFailCount > 0 || deltaOverflowCount > 0))
+    if (millis() - lastTxLog > 5000 && sendFailCount > 0)
     {
         Serial.printf(
-            "[TDMA] Stats: Fails=%lu, DeltaOverflows=%lu, QueueFrames=%u\n",
-            sendFailCount, deltaOverflowCount, frameQueueCount);
+            "[TDMA] Stats: Fails=%lu, QueueFrames=%u\n",
+            sendFailCount, frameQueueCount);
         lastTxLog = millis();
     }
 #endif

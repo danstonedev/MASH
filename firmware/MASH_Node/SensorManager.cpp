@@ -57,12 +57,16 @@ SensorManager::SensorManager()
 
 void SensorManager::selectChannel(uint8_t channel)
 {
+#if USE_MULTIPLEXER
   if (!useMultiplexer || channel >= 8)
     return;
 
   Wire.beginTransmission(TCA9548A_ADDRESS);
   Wire.write(1 << channel);
   Wire.endTransmission();
+#else
+  (void)channel; // Multiplexer disabled at compile time
+#endif
 }
 
 bool SensorManager::init(uint8_t baseNodeId)
@@ -71,6 +75,7 @@ bool SensorManager::init(uint8_t baseNodeId)
 
   Serial.println("[SensorMgr] Scanning for IMU sensors...");
 
+#if USE_MULTIPLEXER
   // Probe for multiplexer with retries
   // Some boards need a moment to stabilize I2C after Wire.begin()
   for (int retry = 0; retry < 3; retry++)
@@ -119,6 +124,7 @@ bool SensorManager::init(uint8_t baseNodeId)
     }
   }
   else
+#endif // USE_MULTIPLEXER
   {
     // ===== Wire bus (Stemma QT): probe 0x68 then 0x69 =====
     if (sensors[0].begin(&Wire, ICM20649_DEFAULT_ADDRESS))
@@ -133,41 +139,61 @@ bool SensorManager::init(uint8_t baseNodeId)
       sensorCount = 1;
     }
 
-    if (sensors[sensorCount].begin(&Wire, 0x69))
+    // Probe Wire @ 0x69 with retries — ICM20649 needs up to 100ms after power-on
+    for (int r = 0; r < 3 && sensorCount < MAX_SENSORS; r++)
     {
-      Serial.println("[SensorMgr] Found ICM20649 on Wire @ 0x69 (Stemma QT, ADO high)");
+      if (sensors[sensorCount].begin(&Wire, 0x69))
+      {
+        Serial.printf("[SensorMgr] Found ICM20649 on Wire @ 0x69 (Stemma QT, ADO high) attempt %d\n", r + 1);
 
-      sensors[sensorCount].configurePhysics(RANGE_8G, RANGE_2000DPS, DLPF_51HZ);
-      sensors[sensorCount].setOutputDataRate(ODR_375HZ);
+        sensors[sensorCount].configurePhysics(RANGE_8G, RANGE_2000DPS, DLPF_51HZ);
+        sensors[sensorCount].setOutputDataRate(ODR_375HZ);
 
-      sensorData[sensorCount].sensorId = sensorCount + SENSOR_ID_OFFSET;
-      sensorChannels[sensorCount] = -1;
-      sensorCount++;
+        sensorData[sensorCount].sensorId = sensorCount + SENSOR_ID_OFFSET;
+        sensorChannels[sensorCount] = -1;
+        sensorCount++;
+        break;
+      }
+      Serial.printf("[SensorMgr] Wire@0x69 probe failed (attempt %d/3), retrying...\n", r + 1);
+      delay(50);
     }
 
     // ===== Wire1 bus (castellated SDA/SCL pads): probe 0x68 then 0x69 =====
-    if (sensorCount < MAX_SENSORS && sensors[sensorCount].begin(&Wire1, ICM20649_DEFAULT_ADDRESS))
+    // Retry loop — sensor may still be in power-on reset
+    for (int r = 0; r < 3 && sensorCount < MAX_SENSORS; r++)
     {
-      Serial.println("[SensorMgr] Found ICM20649 on Wire1 @ 0x68 (SDA/SCL pads)");
+      if (sensors[sensorCount].begin(&Wire1, ICM20649_DEFAULT_ADDRESS))
+      {
+        Serial.printf("[SensorMgr] Found ICM20649 on Wire1 @ 0x68 (SDA/SCL pads) attempt %d\n", r + 1);
 
-      sensors[sensorCount].configurePhysics(RANGE_8G, RANGE_2000DPS, DLPF_51HZ);
-      sensors[sensorCount].setOutputDataRate(ODR_375HZ);
+        sensors[sensorCount].configurePhysics(RANGE_8G, RANGE_2000DPS, DLPF_51HZ);
+        sensors[sensorCount].setOutputDataRate(ODR_375HZ);
 
-      sensorData[sensorCount].sensorId = sensorCount + SENSOR_ID_OFFSET;
-      sensorChannels[sensorCount] = -1;
-      sensorCount++;
+        sensorData[sensorCount].sensorId = sensorCount + SENSOR_ID_OFFSET;
+        sensorChannels[sensorCount] = -1;
+        sensorCount++;
+        break;
+      }
+      Serial.printf("[SensorMgr] Wire1@0x68 probe failed (attempt %d/3), retrying...\n", r + 1);
+      delay(50);
     }
 
-    if (sensorCount < MAX_SENSORS && sensors[sensorCount].begin(&Wire1, 0x69))
+    for (int r = 0; r < 3 && sensorCount < MAX_SENSORS; r++)
     {
-      Serial.println("[SensorMgr] Found ICM20649 on Wire1 @ 0x69 (SDA/SCL pads, ADO high)");
+      if (sensors[sensorCount].begin(&Wire1, 0x69))
+      {
+        Serial.printf("[SensorMgr] Found ICM20649 on Wire1 @ 0x69 (SDA/SCL pads, ADO high) attempt %d\n", r + 1);
 
-      sensors[sensorCount].configurePhysics(RANGE_8G, RANGE_2000DPS, DLPF_51HZ);
-      sensors[sensorCount].setOutputDataRate(ODR_375HZ);
+        sensors[sensorCount].configurePhysics(RANGE_8G, RANGE_2000DPS, DLPF_51HZ);
+        sensors[sensorCount].setOutputDataRate(ODR_375HZ);
 
-      sensorData[sensorCount].sensorId = sensorCount + SENSOR_ID_OFFSET;
-      sensorChannels[sensorCount] = -1;
-      sensorCount++;
+        sensorData[sensorCount].sensorId = sensorCount + SENSOR_ID_OFFSET;
+        sensorChannels[sensorCount] = -1;
+        sensorCount++;
+        break;
+      }
+      Serial.printf("[SensorMgr] Wire1@0x69 probe failed (attempt %d/3), retrying...\n", r + 1);
+      delay(50);
     }
   }
 
@@ -178,6 +204,7 @@ bool SensorManager::init(uint8_t baseNodeId)
   // ========== Auto-detect optional sensors ==========
   Serial.println("[SensorMgr] Scanning for optional sensors...");
 
+#if USE_MULTIPLEXER
   if (useMultiplexer)
   {
     for (uint8_t ch = 0; ch < 8; ch++)
@@ -213,6 +240,7 @@ bool SensorManager::init(uint8_t baseNodeId)
     Wire.endTransmission();
     delay(10);
   }
+#endif // USE_MULTIPLEXER
 
   // Try direct I2C for optional sensors
   if (!hasMagnetometer && mag.begin(MMC5603_ADDRESS, &Wire))
@@ -611,16 +639,6 @@ IMUData SensorManager::getData(uint8_t sensorIndex)
     return sensorData[sensorIndex];
   }
   return IMUData{0, 0, 0, 0, 0, 0, 0, 0};
-}
-
-Quaternion SensorManager::getQuaternion(uint8_t sensorIndex)
-{
-  static const Quaternion kIdentityQuat(1.0f, 0.0f, 0.0f, 0.0f);
-  if (sensorIndex < sensorCount)
-  {
-    return kIdentityQuat; // Always identity (fusion moved to TDMA layer)
-  }
-  return kIdentityQuat;
 }
 
 uint8_t SensorManager::getSensorCount() const { return sensorCount; }

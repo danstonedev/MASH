@@ -80,6 +80,9 @@ export function SystemCommands() {
         "This will clear all registered nodes and restart discovery. Continue?",
       )
     ) {
+      // Clear webapp-side state so stale nodes don't linger
+      useNetworkStore.getState().reset();
+      useDeviceRegistry.getState().clear();
       sendCommand("TDMA_RESCAN");
     }
   };

@@ -1,5 +1,7 @@
 # IMU Connect - Data Load & Pipeline Analysis
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** Delta compression references are outdated — delta compression was removed. BLE mode no longer exists. See `TDMAProtocol.h` for current protocol definitions.
+
 ## Executive Summary
 
 This document provides a detailed walkthrough of the data flow through the IMU Connect system, from sensor sampling through to web app delivery. It maps how the parallelization optimizations align with the data path and identifies remaining optimization opportunities.

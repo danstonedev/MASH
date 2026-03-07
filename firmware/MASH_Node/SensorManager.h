@@ -47,12 +47,6 @@ public:
   IMUData getData(uint8_t sensorIndex);
 
   /**
-   * Get the fused quaternion for a specific sensor
-   * @return Identity Quaternion always (fusion moved to TDMA layer)
-   */
-  Quaternion getQuaternion(uint8_t sensorIndex);
-
-  /**
    * Get the number of detected sensors
    */
   uint8_t getSensorCount() const;

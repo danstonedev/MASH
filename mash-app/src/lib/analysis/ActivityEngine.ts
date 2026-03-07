@@ -11,7 +11,7 @@
  * 4. Smooth output via majority voting
  */
 
-import type { IMUDataPacket } from "../ble/DeviceInterface";
+import type { IMUDataPacket } from "../protocol/DeviceInterface";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants

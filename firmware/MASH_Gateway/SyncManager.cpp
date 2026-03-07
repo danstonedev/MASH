@@ -66,7 +66,7 @@ SyncManager::SyncManager()
       tdmaFrameNumber(0), lastBeaconTime(0), discoveryStartTime(0),
       lastPruneTime(0), syncResetBeaconsRemaining(0),
       syncResetFrameNumberPending(false), syncPhaseCount(0), nodeCount(0),
-      preRegisteredNodeCount(0), isStreaming(false)
+      preRegisteredNodeCount(0), expectedNodeCount(0), isStreaming(false)
 {
   globalSyncManager = this;
 
@@ -79,12 +79,17 @@ void SyncManager::init(const char *deviceName)
   // ============================================================================
   // WiFi Setup for ESP-NOW
   // ============================================================================
-  // V5-FIX: Was WIFI_STA which overrode the WIFI_AP_STA set by MASH_Gateway.ino.
-  // AP_STA is required so the Gateway can simultaneously:
-  //   - Run ESP-NOW for TDMA node communication (STA side)
-  //   - Host a SoftAP for webapp WiFi connectivity (AP side)
+  // RELIABILITY FIX: Use WIFI_STA for ESP-NOW exclusive radio access.
+  // WIFI_AP_STA (V5-FIX) caused the AP interface to be initialized even
+  // without WiFi.softAP(), adding WiFi driver overhead that reduces
+  // ESP-NOW packet reception reliability — causing 4/6 nodes to fail
+  // registration. WiFiManager::startAP() switches to AP_STA on demand.
   // ============================================================================
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_STA);
+
+  // CRITICAL: Disable WiFi power save for reliable ESP-NOW.
+  // Must be called AFTER WiFi.mode() to ensure the setting sticks.
+  esp_wifi_set_ps(WIFI_PS_NONE);
 
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK)
@@ -114,12 +119,27 @@ void SyncManager::init(const char *deviceName)
 
   // OPP-8: Load persisted node topology from NVS
 #if DEVICE_ROLE == DEVICE_ROLE_GATEWAY
+  // Auto-clear stale NVS topology when firmware is reflashed.
+  // __DATE__ and __TIME__ change on every compile, so a mismatch means new firmware.
+  clearNVSIfFirmwareChanged();
   loadTopologyFromNVS();
 #endif
 }
 
 void SyncManager::update()
 {
+  // ============================================================================
+  // DEFERRED NVS WRITE: Save topology outside ESP-NOW callback context.
+  // handleNodeRegistration() sets pendingSaveTopology=true instead of
+  // calling saveTopologyToNVS() directly. NVS flash writes take 10-100ms
+  // and would block the WiFi task, dropping incoming ESP-NOW packets.
+  // ============================================================================
+  if (pendingSaveTopology)
+  {
+    pendingSaveTopology = false;
+    saveTopologyToNVS();
+  }
+
   // ============================================================================
   // TDMA Mode - Beacon-based synchronized transmission
   // ============================================================================
@@ -178,6 +198,35 @@ void SyncManager::update()
         }
         // ====================================================================
 
+        // ====================================================================
+        // EARLY-EXIT: If user set an expected node count and we've reached it,
+        // skip the full timeout and proceed immediately. This gives the user
+        // precise control: "I have 6 nodes, go as soon as all 6 register."
+        // ====================================================================
+        uint8_t aliveCount = 0;
+        for (int i = 0; i < TDMA_MAX_NODES; i++)
+        {
+          if (registeredNodes[i].registered &&
+              registeredNodes[i].lastHeard > 0)
+          {
+            aliveCount++;
+          }
+        }
+
+        bool earlyExit = (expectedNodeCount > 0 && aliveCount >= expectedNodeCount);
+        if (earlyExit)
+        {
+          SAFE_LOG("[TDMA] EARLY-EXIT: %d/%d expected nodes registered — "
+                   "proceeding immediately!\n",
+                   aliveCount, expectedNodeCount);
+          recalculateSlots();
+          sendTDMASchedule();
+          tdmaState = TDMA_STATE_SYNC;
+          preRegisteredNodeCount = 0;
+          break;
+        }
+        // ====================================================================
+
         uint32_t discoveryTimeout = (preRegisteredNodeCount > 0)
                                         ? SHORT_DISCOVERY_MS
                                         : DISCOVERY_DURATION_MS;
@@ -188,28 +237,22 @@ void SyncManager::update()
             // ==================================================================
             // P4-FIX: Auto-extend discovery if not all expected nodes connected.
             // If NVS expected N nodes but only M < N are alive (lastHeard > 0),
-            // extend discovery ONE more time (up to full 10s) to give
-            // stragglers a chance. After the extension, proceed regardless.
+            // extend discovery ONE more time to give stragglers a chance.
+            // After the extension, proceed regardless.
             // ==================================================================
-            uint8_t aliveCount = 0;
-            for (int i = 0; i < TDMA_MAX_NODES; i++)
-            {
-              if (registeredNodes[i].registered &&
-                  registeredNodes[i].lastHeard > 0)
-              {
-                aliveCount++;
-              }
-            }
-
             static bool discoveryExtended = false;
-            if (preRegisteredNodeCount > 0 && aliveCount < preRegisteredNodeCount &&
+            uint8_t targetCount = (expectedNodeCount > 0) ? expectedNodeCount
+                                                          : preRegisteredNodeCount;
+            if (targetCount > 0 && aliveCount < targetCount &&
                 !discoveryExtended)
             {
               discoveryExtended = true;
-              SAFE_LOG("[TDMA] P4: Only %d/%d expected nodes alive — "
+              // Extension uses SHORT_DISCOVERY_MS (15s) — enough for
+              // stragglers without making operator wait forever
+              SAFE_LOG("[TDMA] P4: Only %d/%d target nodes alive — "
                        "extending discovery by %lu ms\n",
-                       aliveCount, preRegisteredNodeCount,
-                       DISCOVERY_DURATION_MS);
+                       aliveCount, targetCount,
+                       SHORT_DISCOVERY_MS);
               discoveryStartTime = millis();
               // Don't break — let the loop continue sending beacons
             }
@@ -250,7 +293,18 @@ void SyncManager::update()
       break;
 
     case TDMA_STATE_SYNC:
-      // Brief sync phase - send schedule a few more times (not every beacon!)
+      // ====================================================================
+      // OPT-3: Adaptive SYNC phase with early-exit.
+      // The SYNC phase re-broadcasts the schedule for reliability. But if
+      // all nodes already received the schedule (indicated by the absence
+      // of re-registration attempts), we can exit early.
+      //
+      // Rules:
+      //   - Minimum 15 beacons (300ms) — ensures at least 2 schedule sends
+      //   - After minimum, exit if no registrations received for 100ms
+      //     (5 beacon periods of silence = all nodes have their schedule)
+      //   - Hard cap at 50 beacons (1000ms) as original safety fallback
+      // ====================================================================
       if (now - lastBeaconTime >= TDMA_FRAME_PERIOD_MS * 1000)
       {
         sendTDMABeacon();
@@ -264,7 +318,21 @@ void SyncManager::update()
           sendTDMASchedule();
         }
 
-        if (syncPhaseCount >= 50) // ~1 second of sync phase
+        // Adaptive early-exit: after minimum 15 beacons, exit if quiet
+        bool minimumPhaseMet = (syncPhaseCount >= 15);
+        uint32_t timeSinceLastReg = millis() - lastRegistrationReceivedMs;
+        bool noRecentRegistrations = (timeSinceLastReg > 100);
+
+        if (minimumPhaseMet && noRecentRegistrations)
+        {
+          tdmaState = TDMA_STATE_RUNNING;
+          SAFE_LOG("[TDMA] OPT-3: Adaptive SYNC exit after %d beacons "
+                   "(no registrations for %lu ms)\n",
+                   syncPhaseCount, timeSinceLastReg);
+          syncPhaseCount = 0;
+          lastPruneTime = millis();
+        }
+        else if (syncPhaseCount >= 50) // Original hard cap
         {
           tdmaState = TDMA_STATE_RUNNING;
           syncPhaseCount = 0;
@@ -362,78 +430,6 @@ void SyncManager::sendSyncPulse()
   // Serial.println("[Sync] Sent sync pulse");
 }
 
-void SyncManager::sendIMUData(SensorManager &sm)
-{
-#if DEVICE_ROLE == DEVICE_ROLE_NODE
-  ESPNowDataPacket packet;
-  memset(&packet, 0, sizeof(packet)); // Clear buffer
-
-  packet.type = 0x02; // IMU Data (Compressed)
-  packet.count = sm.getSensorCount();
-  if (packet.count > MAX_SENSORS)
-    packet.count = MAX_SENSORS;
-  packet.timestamp = getAdjustedTime(); // Use synced time if available
-
-  for (int i = 0; i < packet.count; i++)
-  {
-    IMUData data = sm.getData(i);
-    Quaternion q = sm.getQuaternion(i);
-
-    // ID mapping
-    packet.sensors[i].id = i + SENSOR_ID_OFFSET;
-
-    // Compression
-    packet.sensors[i].q[0] = (int16_t)(q.w * 16384.0f);
-    packet.sensors[i].q[1] = (int16_t)(q.x * 16384.0f);
-    packet.sensors[i].q[2] = (int16_t)(q.y * 16384.0f);
-    packet.sensors[i].q[3] = (int16_t)(q.z * 16384.0f);
-
-    packet.sensors[i].a[0] = (int16_t)(data.accelX * 100.0f);
-    packet.sensors[i].a[1] = (int16_t)(data.accelY * 100.0f);
-    packet.sensors[i].a[2] = (int16_t)(data.accelZ * 100.0f);
-
-    packet.sensors[i].g[0] = (int16_t)(data.gyroX * 100.0f);
-    packet.sensors[i].g[1] = (int16_t)(data.gyroY * 100.0f);
-    packet.sensors[i].g[2] = (int16_t)(data.gyroZ * 100.0f);
-  }
-
-  uint8_t gatewayMac[] = GATEWAY_MAC_ADDRESS;
-  esp_now_send(gatewayMac, (uint8_t *)&packet, sizeof(packet));
-#endif
-}
-
-void SyncManager::sendEnviroData(SensorManager &sm)
-{
-#if DEVICE_ROLE == DEVICE_ROLE_NODE
-  ESPNowEnviroPacket packet;
-  memset(&packet, 0, sizeof(packet));
-
-  packet.type = 0x04; // Environmental Data
-  packet.hasMag = sm.hasMag() ? 1 : 0;
-  packet.hasBaro = sm.hasBaro() ? 1 : 0;
-
-  if (sm.hasMag())
-  {
-    MagData mag = sm.getMagData();
-    packet.mag[0] = mag.x;
-    packet.mag[1] = mag.y;
-    packet.mag[2] = mag.z;
-    packet.mag[3] = mag.heading;
-  }
-
-  if (sm.hasBaro())
-  {
-    BaroData baro = sm.getBaroData();
-    packet.baro[0] = baro.pressure;
-    packet.baro[1] = baro.temperature;
-    packet.baro[2] = baro.altitude;
-  }
-
-  uint8_t gatewayMac[] = GATEWAY_MAC_ADDRESS;
-  esp_now_send(gatewayMac, (uint8_t *)&packet, sizeof(packet));
-#endif
-}
-
 void SyncManager::sendNodeInfo(SensorManager &sm, const char *name)
 {
 #if DEVICE_ROLE == DEVICE_ROLE_NODE
@@ -514,12 +510,16 @@ void SyncManager::onPacketReceived(const uint8_t *senderMac,
   // ============================================================================
   else if (type == TDMA_PACKET_DELAY_REQ && len >= sizeof(TDMADelayReqPacket))
   {
+    // DELAY_REQ = node is SYNCED and doing PTP timing
+    updateNodeLastDataByMAC(senderMac);
     handleDelayReq(data, len);
   }
   // ============================================================================
   else
   {
     // Forward unknown/data packets to callback
+    // Data packets = node is SYNCED and streaming
+    updateNodeLastDataByMAC(senderMac);
     if (onDataCallback)
     {
       onDataCallback(data, len);
@@ -735,9 +735,10 @@ void SyncManager::startTDMA()
     esp_now_add_peer(&peerInfo);
   }
 
-  SAFE_LOG("[TDMA] Discovery phase started (%lu ms)\n",
+  SAFE_LOG("[TDMA] Discovery phase started (%lu ms max, expectedNodes=%d)\n",
            (preRegisteredNodeCount > 0) ? SHORT_DISCOVERY_MS
-                                        : DISCOVERY_DURATION_MS);
+                                        : DISCOVERY_DURATION_MS,
+           expectedNodeCount);
 }
 
 void SyncManager::stopTDMA()
@@ -760,7 +761,8 @@ void SyncManager::restartDiscovery()
   // Notify webapp so SyncFrameBuffer resets expected sensors
   if (onNodePruned)
   {
-    onNodePruned();
+    // Pass empty list — full restart, not individual prunes
+    onNodePruned(nullptr, 0);
   }
 
   startTDMA();
@@ -849,6 +851,51 @@ void SyncManager::updateNodeLastHeardByMAC(const uint8_t *mac)
       return;
     }
   }
+}
+
+void SyncManager::updateNodeLastDataByMAC(const uint8_t *mac)
+{
+  for (int i = 0; i < TDMA_MAX_NODES; i++)
+  {
+    if (registeredNodes[i].registered &&
+        memcmp(registeredNodes[i].mac, mac, 6) == 0)
+    {
+      registeredNodes[i].lastDataReceivedMs = millis();
+      return;
+    }
+  }
+}
+
+uint8_t SyncManager::getSyncedNodeCount(uint32_t activeThresholdMs) const
+{
+  const uint32_t now = millis();
+  uint8_t count = 0;
+  for (int i = 0; i < TDMA_MAX_NODES; i++)
+  {
+    if (registeredNodes[i].registered &&
+        registeredNodes[i].lastDataReceivedMs > 0 &&
+        (now - registeredNodes[i].lastDataReceivedMs) <= activeThresholdMs)
+    {
+      count++;
+    }
+  }
+  return count;
+}
+
+uint8_t SyncManager::getSyncedSensorCount(uint32_t activeThresholdMs) const
+{
+  const uint32_t now = millis();
+  uint8_t count = 0;
+  for (int i = 0; i < TDMA_MAX_NODES; i++)
+  {
+    if (registeredNodes[i].registered &&
+        registeredNodes[i].lastDataReceivedMs > 0 &&
+        (now - registeredNodes[i].lastDataReceivedMs) <= activeThresholdMs)
+    {
+      count = (uint8_t)(count + registeredNodes[i].sensorCount);
+    }
+  }
+  return count;
 }
 
 void SyncManager::sendTDMABeacon()
@@ -1145,6 +1192,9 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
     reg->sensorCount = MAX_SENSORS;
   }
 
+  // OPT-3: Track last registration time for adaptive SYNC exit
+  lastRegistrationReceivedMs = millis();
+
   SAFE_LOG("[TDMA] >>> Registration from node %d: %s (%d sensors) "
            "MAC=%02X:%02X:%02X:%02X:%02X:%02X <<<\n",
            reg->nodeId, reg->nodeName, reg->sensorCount, senderMac[0],
@@ -1192,6 +1242,7 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
         registeredNodes[i].nodeId == reg->nodeId)
     {
       // Update existing entry
+      portENTER_CRITICAL(&_registeredNodesLock);
       bool sensorCountChanged = (registeredNodes[i].sensorCount != reg->sensorCount);
       registeredNodes[i].sensorCount = reg->sensorCount;
       registeredNodes[i].hasMag = reg->hasMag;
@@ -1200,6 +1251,7 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
       registeredNodes[i].nodeName[15] = '\0';
       registeredNodes[i].lastHeard = millis();
       memcpy(registeredNodes[i].mac, senderMac, 6);
+      portEXIT_CRITICAL(&_registeredNodesLock);
 
       // If sensorCount changed (e.g. first registration used fallback MAX_SENSORS
       // but correct count arrived on re-registration), recompute slot widths now
@@ -1214,6 +1266,13 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
         // so slot offsets and timing arrive in tight succession.
         sendTDMABeacon();
         sendTDMASchedule();
+        // Notify webapp of the updated sensor count — same as a new registration.
+        // Without this the webapp keeps the stale count from the first registration
+        // and the missing sensors never appear.
+        if (onNodeRegistered)
+        {
+          onNodeRegistered(reg->nodeId, reg->sensorCount);
+        }
         return;
       }
 
@@ -1323,6 +1382,8 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
       }
       // ====================================================================
 
+      // EC-2: Protect registeredNodes[] mutations against concurrent reads
+      portENTER_CRITICAL(&_registeredNodesLock);
       registeredNodes[i].nodeId = reg->nodeId;
       registeredNodes[i].sensorCount = reg->sensorCount;
       registeredNodes[i].hasMag = reg->hasMag;
@@ -1333,6 +1394,7 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
       registeredNodes[i].registered = true;
       memcpy(registeredNodes[i].mac, senderMac, 6);
       nodeCount++;
+      portEXIT_CRITICAL(&_registeredNodesLock);
 
       SAFE_LOG("[TDMA] *** REGISTERED NEW NODE %d in slot %d (total: %d) ***\n",
                reg->nodeId, i, nodeCount);
@@ -1351,8 +1413,12 @@ void SyncManager::handleNodeRegistration(const uint8_t *senderMac,
         onNodeRegistered(reg->nodeId, reg->sensorCount);
       }
 
-      // OPP-8: Persist updated topology to NVS
-      saveTopologyToNVS();
+      // OPP-8: Defer NVS write to update() context.
+      // NVS flash writes take 10-100ms, blocking the WiFi task and
+      // causing incoming ESP-NOW registrations from other nodes to be
+      // dropped. With 6 nodes registering simultaneously, this caused
+      // cascading packet loss and only 2/6 nodes connecting.
+      pendingSaveTopology = true;
       return;
     }
   }
@@ -1409,6 +1475,8 @@ void SyncManager::pruneInactiveNodes()
 {
   uint32_t now = millis();
   bool changed = false;
+  uint8_t prunedNodeIds[TDMA_MAX_NODES];
+  uint8_t prunedCount = 0;
 
   for (int i = 0; i < TDMA_MAX_NODES; i++)
   {
@@ -1419,8 +1487,14 @@ void SyncManager::pruneInactiveNodes()
       {
         SAFE_LOG("[TDMA] Pruning inactive node %d (%s)\n",
                  registeredNodes[i].nodeId, registeredNodes[i].nodeName);
+        if (prunedCount < TDMA_MAX_NODES)
+        {
+          prunedNodeIds[prunedCount++] = registeredNodes[i].nodeId;
+        }
+        portENTER_CRITICAL(&_registeredNodesLock);
         registeredNodes[i].registered = false;
         nodeCount--;
+        portEXIT_CRITICAL(&_registeredNodesLock);
         changed = true;
       }
     }
@@ -1438,7 +1512,7 @@ void SyncManager::pruneInactiveNodes()
     // shrink its expected sensor set and stop emitting phantom IDs.
     if (onNodePruned)
     {
-      onNodePruned();
+      onNodePruned(prunedNodeIds, prunedCount);
     }
   }
 }
@@ -1513,6 +1587,7 @@ void SyncManager::sendDelayResp(uint8_t nodeId, uint32_t sequenceNum,
 
 uint8_t SyncManager::getExpectedSensorCount() const
 {
+  portENTER_CRITICAL(&_registeredNodesLock);
   uint8_t totalSensors = 0;
   for (int i = 0; i < TDMA_MAX_NODES; i++)
   {
@@ -1524,6 +1599,7 @@ uint8_t SyncManager::getExpectedSensorCount() const
                           : 1;
     }
   }
+  portEXIT_CRITICAL(&_registeredNodesLock);
   return totalSensors;
 }
 
@@ -1534,6 +1610,9 @@ uint8_t SyncManager::getExpectedSensorIds(uint8_t *sensorIds,
   // expected sensor IDs match the compact IDs used in the data path.
   // Without this, the expected list could be in a different order than
   // the compact IDs, causing the SyncFrameBuffer to reject valid samples.
+
+  // EC-2: Protect registeredNodes[] reads against concurrent writes.
+  portENTER_CRITICAL(&_registeredNodesLock);
 
   // Build sorted index list (same logic as getCompactSensorId)
   uint8_t sortedIndices[TDMA_MAX_NODES];
@@ -1574,6 +1653,7 @@ uint8_t SyncManager::getExpectedSensorIds(uint8_t *sensorIds,
       idx++;
     }
   }
+  portEXIT_CRITICAL(&_registeredNodesLock);
   return idx;
 }
 
@@ -1588,6 +1668,10 @@ uint8_t SyncManager::getCompactSensorId(uint8_t nodeId,
   // re-registering in different slots shifted ALL subsequent compact IDs,
   // causing the webapp to lose track of sensor identity.
   // ==========================================================================
+
+  // EC-2: Protect registeredNodes[] reads against concurrent writes from
+  // handleNodeRegistration() on another core.
+  portENTER_CRITICAL(&_registeredNodesLock);
 
   // Build a sorted index list of registered nodes (by ascending nodeId)
   uint8_t sortedIndices[TDMA_MAX_NODES];
@@ -1631,14 +1715,17 @@ uint8_t SyncManager::getCompactSensorId(uint8_t nodeId,
     {
       if (localSensorIndex >= effectiveCount)
       {
+        portEXIT_CRITICAL(&_registeredNodesLock);
         return 0;
       }
+      portEXIT_CRITICAL(&_registeredNodesLock);
       return (uint8_t)(compactBase + localSensorIndex + 1);
     }
 
     compactBase = (uint8_t)(compactBase + effectiveCount);
   }
 
+  portEXIT_CRITICAL(&_registeredNodesLock);
   return 0;
 }
 // ============================================================================
@@ -1705,6 +1792,47 @@ struct __attribute__((packed)) NVSNodeEntry
 
 static const char *TOPO_NVS_NS = "tdma_topo";
 
+// ============================================================================
+// Auto-clear NVS topology when firmware changes (new flash).
+// Stores a build signature (__DATE__ " " __TIME__) in NVS. If the stored
+// signature differs from the running firmware, the topology is wiped so
+// stale sensor counts / node entries don't persist across firmware updates.
+// ============================================================================
+void SyncManager::clearNVSIfFirmwareChanged()
+{
+  static const char *BUILD_SIG = __DATE__ " " __TIME__; // e.g. "Mar  4 2026 14:30:05"
+
+  Preferences prefs;
+  if (!prefs.begin(TOPO_NVS_NS, false)) // read-write
+  {
+    SAFE_PRINTLN("[TDMA-NVS] Failed to open NVS for firmware check");
+    return;
+  }
+
+  String stored = prefs.getString("buildSig", "");
+  if (stored != BUILD_SIG)
+  {
+    SAFE_LOG("[TDMA-NVS] Firmware changed! Old: \"%s\" -> New: \"%s\"\n",
+             stored.length() > 0 ? stored.c_str() : "(none)", BUILD_SIG);
+    SAFE_PRINTLN("[TDMA-NVS] Clearing stale topology from NVS...");
+
+    // Clear all topology data but keep the namespace open
+    prefs.clear();
+
+    // Write the new build signature so we don't clear again on next boot
+    prefs.putString("buildSig", BUILD_SIG);
+    prefs.end();
+
+    preRegisteredNodeCount = 0;
+    SAFE_PRINTLN("[TDMA-NVS] Topology cleared - nodes will re-register from scratch");
+  }
+  else
+  {
+    prefs.end();
+    SAFE_LOG("[TDMA-NVS] Firmware unchanged (%s) - keeping persisted topology\n", BUILD_SIG);
+  }
+}
+
 void SyncManager::saveTopologyToNVS()
 {
   Preferences prefs;
@@ -1769,8 +1897,18 @@ void SyncManager::loadTopologyFromNVS()
     size_t readLen = prefs.getBytes(key, &entry, sizeof(NVSNodeEntry));
     if (readLen == sizeof(NVSNodeEntry))
     {
+      portENTER_CRITICAL(&_registeredNodesLock);
       registeredNodes[i].nodeId = entry.nodeId;
-      registeredNodes[i].sensorCount = entry.sensorCount;
+
+      // CLAMP: Prevent stale NVS data from inflating sensor counts beyond
+      // current MAX_SENSORS (e.g. old mux-era entries with sensorCount=8)
+      uint8_t clampedCount = entry.sensorCount;
+      if (clampedCount > MAX_SENSORS)
+      {
+        clampedCount = MAX_SENSORS;
+      }
+      registeredNodes[i].sensorCount = clampedCount;
+
       registeredNodes[i].hasMag = entry.hasMag != 0;
       registeredNodes[i].hasBaro = entry.hasBaro != 0;
       memcpy(registeredNodes[i].nodeName, entry.nodeName, 16);
@@ -1778,23 +1916,54 @@ void SyncManager::loadTopologyFromNVS()
       memcpy(registeredNodes[i].mac, entry.mac, 6);
       registeredNodes[i].registered = true;
       registeredNodes[i].lastHeard = 0; // V2-FIX: Mark as NOT recently heard.
+      portEXIT_CRITICAL(&_registeredNodesLock);
+
+      // Log clamping OUTSIDE the spinlock
+      if (entry.sensorCount > MAX_SENSORS)
+      {
+        SAFE_LOG("[TDMA-NVS] WARNING: Clamped node %d sensorCount %d -> %d (MAX_SENSORS)\n",
+                 entry.nodeId, entry.sensorCount, MAX_SENSORS);
+      }
       // Setting millis() here made NVS-loaded dead nodes appear alive,
       // preventing pruning for a full timeout cycle. Zero ensures they
       // must re-register (send a heartbeat) to stay in the topology.
-      registeredNodes[i].slotOffsetUs = 0; // Will be recalculated
-      registeredNodes[i].slotWidthUs = 0;  // Will be recalculated
+      registeredNodes[i].lastDataReceivedMs = 0; // No data until node re-syncs
+      registeredNodes[i].slotOffsetUs = 0;       // Will be recalculated
+      registeredNodes[i].slotWidthUs = 0;        // Will be recalculated
       loaded++;
 
-      SAFE_LOG("[TDMA-NVS] Loaded node %d (%s) with %d sensors\n", entry.nodeId,
-               entry.nodeName, entry.sensorCount);
+      SAFE_LOG("[TDMA-NVS] Loaded node %d (%s) with %d sensors%s\n", entry.nodeId,
+               entry.nodeName, clampedCount,
+               (entry.sensorCount != clampedCount) ? " (CLAMPED)" : "");
     }
   }
+
+  // Load expected node count (persisted by setExpectedNodeCount)
+  expectedNodeCount = prefs.getUChar("expNodes", 0);
 
   prefs.end();
 
   nodeCount = loaded;
   preRegisteredNodeCount = loaded;
-  SAFE_LOG("[TDMA-NVS] Restored %d nodes from NVS\n", loaded);
+
+  // ==========================================================================
+  // OPT-2: Auto-infer expectedNodeCount from NVS topology.
+  // If the user never explicitly set expectedNodeCount (still 0) but NVS
+  // has a known topology, use preRegisteredNodeCount as the expected count.
+  // This automatically enables EARLY-EXIT on every boot after the first
+  // successful discovery, without requiring the webapp to send SET_EXPECTED_NODES.
+  // Example: First boot discovers 6 nodes → saves to NVS.  Second boot loads
+  // 6 from NVS → expectedNodeCount auto-set to 6 → early-exit triggers as
+  // soon as all 6 re-register (typically <100ms after first beacon).
+  // ==========================================================================
+  if (expectedNodeCount == 0 && loaded > 0)
+  {
+    expectedNodeCount = loaded;
+    SAFE_LOG("[TDMA-NVS] OPT-2: Auto-inferred expectedNodeCount=%d from NVS topology\n",
+             expectedNodeCount);
+  }
+
+  SAFE_LOG("[TDMA-NVS] Restored %d nodes from NVS (expectedNodeCount=%d)\n", loaded, expectedNodeCount);
 }
 
 void SyncManager::clearPersistedTopology()
@@ -1803,10 +1972,32 @@ void SyncManager::clearPersistedTopology()
   if (prefs.begin(TOPO_NVS_NS, false))
   {
     prefs.clear();
+    // Re-write build signature so the next boot doesn't double-clear
+    prefs.putString("buildSig", __DATE__ " " __TIME__);
     prefs.end();
     preRegisteredNodeCount = 0;
     SAFE_PRINTLN("[TDMA-NVS] Cleared persisted topology");
   }
+}
+
+void SyncManager::setExpectedNodeCount(uint8_t count)
+{
+  if (count > TDMA_MAX_NODES)
+  {
+    count = TDMA_MAX_NODES;
+  }
+  expectedNodeCount = count;
+
+  // Persist to NVS so it survives reboots
+  Preferences prefs;
+  if (prefs.begin(TOPO_NVS_NS, false))
+  {
+    prefs.putUChar("expNodes", count);
+    prefs.end();
+  }
+
+  SAFE_LOG("[TDMA] Expected node count set to %d%s\n",
+           count, count == 0 ? " (disabled — will use timeout)" : "");
 }
 // ============================================================================
 

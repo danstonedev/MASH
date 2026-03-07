@@ -106,11 +106,13 @@ void SyncManager::onEspNowSent(const wifi_tx_info_t *tx_info,
       // EXPERT REVIEW FIX: Reset consecutive failures on success
       // so Zombie detection can track continuous failure runs.
       globalSyncManager->consecutiveSendFailures = 0;
+      globalSyncManager->tdmaDiagTxSuccess++;
     }
     else
     {
       globalSyncManager->sendFailCount++;
       globalSyncManager->consecutiveSendFailures++;
+      globalSyncManager->tdmaDiagTxFail++;
     }
     portEXIT_CRITICAL(&globalSyncManager->syncStateLock);
   }
@@ -135,11 +137,13 @@ void SyncManager::onEspNowSent(const uint8_t *mac,
     {
       // EXPERT REVIEW FIX: Reset consecutive failures on success
       globalSyncManager->consecutiveSendFailures = 0;
+      globalSyncManager->tdmaDiagTxSuccess++;
     }
     else
     {
       globalSyncManager->sendFailCount++;
       globalSyncManager->consecutiveSendFailures++;
+      globalSyncManager->tdmaDiagTxFail++;
     }
     portEXIT_CRITICAL(&globalSyncManager->syncStateLock);
   }
@@ -171,8 +175,7 @@ SyncManager::SyncManager()
       syncProtocolVersion(SYNC_PROTOCOL_VERSION_LEGACY), offsetSampleIndex(0),
       validSampleCount(0), avgRttUs(0), channelScanStart(0),
       currentScanChannel(0), txPending(false), sendFailCount(0),
-      currentBufferPolicy(POLICY_LIVE), prevSampleValid(false),
-      deltaOverflowCount(0),
+      currentBufferPolicy(POLICY_LIVE),
       // Pipelined packet building state
       pipelinePacketSize(0), pipelineSamplesConsumed(0),
       pipelinePacketReady(false),
@@ -201,9 +204,6 @@ SyncManager::SyncManager()
   // Initialize deterministic frame queue
   memset(frameQueue, 0, sizeof(frameQueue));
 
-  // Initialize delta compression state
-  memset(prevSample, 0, sizeof(prevSample));
-
   // Initialize pipeline packet buffer
   memset(pipelinePacket, 0, sizeof(pipelinePacket));
 
@@ -218,10 +218,10 @@ void SyncManager::init(const char *deviceName)
   // We use WIFI_STA (Station) mode so we don't create an AP.
   WiFi.mode(WIFI_STA);
 
-  // Set initial WiFi channel - start on channel 1, will scan if no beacons
-  esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-  Serial.println("[Sync] Initial WiFi channel set to 1 (will scan if needed)");
-  channelScanStart = millis();
+  // Set WiFi channel to the known gateway channel (compile-time constant)
+  esp_wifi_set_channel(ESP_NOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  Serial.printf("[Sync] WiFi channel locked to %d (no scanning needed)\n",
+                ESP_NOW_CHANNEL);
 
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK)
@@ -403,76 +403,51 @@ void SyncManager::update()
   }
 
   // ============================================================================
-  // FIX #5: IMPROVED CHANNEL SCANNING - Allow re-scanning if beacons are lost
+  // UNREGISTERED STATE: Retry registration on KNOWN channel (no scanning)
+  // ============================================================================
+  // The gateway channel is fixed for this system. Channel scanning causes
+  // schedule-loss during re-sync and is intentionally disabled.
   // ============================================================================
   if (tdmaNodeState == TDMA_NODE_UNREGISTERED)
   {
     uint32_t now = millis();
-    uint32_t timeSinceLastBeacon =
-        (lastBeaconMillis == 0) ? 0xFFFFFFFF : (now - lastBeaconMillis);
 
     // ========================================================================
-    // CRITICAL FIX: Recovery mode - stay on last channel aggressively retrying
-    // MODIFIED: Don't return early! Let beacon processing continue below.
+    // Recovery mode: aggressively retry registration on known channel
     // ========================================================================
     if (inRecoveryMode)
     {
       uint32_t recoveryDuration = now - recoveryModeStartTime;
 
-      // Aggressively retry registration every 500ms while in recovery
-      if (now - lastRegistrationTime > 500)
+      // Retry registration (staggered per node to avoid collision bursts)
+      uint32_t recoveryRetryInterval = 500 + (nodeId % 8) * 70;
+      if (now - lastRegistrationTime > recoveryRetryInterval)
       {
-        // EXPERT REVIEW FIX (v9): Suppress registration retry when sends are
-        // failing
+        // Suppress registration retry when sends are failing
         if (consecutiveSendFailures < 10)
         {
           sendTDMARegistration();
           lastRegistrationTime = now;
           Serial.println(
-              "[RECOVERY] Retrying registration on last known channel...");
+              "[RECOVERY] Retrying registration on channel 1...");
         }
       }
 
-      // After 15 seconds of failed recovery, give up and start channel scanning
+      // After 15 seconds of failed recovery, force radio reinit
       if (recoveryDuration > 15000)
       {
-        Serial.println("[RECOVERY] Timeout! Falling back to channel scanning.");
+        Serial.println("[RECOVERY] Timeout! Reinitializing radio...");
         inRecoveryMode = false;
-        // Reset beacon tracking to trigger fresh channel scan
         lastBeaconMillis = 0;
-        channelScanStart = 0;   // Force immediate channel switch
-        currentScanChannel = 0; // Start from channel 1
+        // Force channel back to 1 in case it drifted
+        esp_wifi_set_channel(ESP_NOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
       }
 
-      // REMOVED: return; - Must NOT skip beacon/schedule processing!
-      // Recovery should retry registration while still listening for beacons
       // Fall through to beacon processing below
     }
     // ========================================================================
 
-    // If no beacon in last 3 seconds, scan channels
-    // This allows re-scanning if Node loses Gateway after initial beacon
-    // reception
-    if (timeSinceLastBeacon > 3000)
-    {
-      // Scan channels 1, 6, 11 (most common WiFi channels), then 2-10
-      static const uint8_t scanChannels[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10};
-      static const int numChannels =
-          sizeof(scanChannels) / sizeof(scanChannels[0]);
-
-      uint32_t timeSinceScan = now - channelScanStart;
-
-      // Spend 500ms on each channel before moving to next
-      if (timeSinceScan > 500)
-      {
-        currentScanChannel = (currentScanChannel + 1) % numChannels;
-        uint8_t newChannel = scanChannels[currentScanChannel];
-        esp_wifi_set_channel(newChannel, WIFI_SECOND_CHAN_NONE);
-        Serial.printf("[Sync] Scanning channel %d for Gateway beacons...\n",
-                      newChannel);
-        channelScanStart = now;
-      }
-    }
+    // If no beacon is heard yet, remain on the fixed channel and keep retrying.
   }
 
   // ============================================================================
@@ -496,7 +471,12 @@ void SyncManager::update()
     // schedule
     if (tdmaNodeState == TDMA_NODE_REGISTERED)
     {
-      if (now - lastRegistrationTime > 500)
+      // RELIABILITY FIX: Stagger retry interval per-nodeId to prevent
+      // all 6 nodes from retrying at the same 500ms cadence (which
+      // creates collision bursts). Each node gets a unique interval:
+      //   nodeId=1 → 500ms, nodeId=2 → 570ms, ... nodeId=6 → 850ms
+      uint32_t retryInterval = 500 + (nodeId % 8) * 70;
+      if (now - lastRegistrationTime > retryInterval)
       {
         sendTDMARegistration();
         lastRegistrationTime = now;
@@ -653,6 +633,106 @@ void SyncManager::sendMagCalibProgress(SensorManager &sm)
 
   // Use auto-discovered Gateway MAC (or fallback to broadcast)
   esp_now_send(gatewayMac, (uint8_t *)&packet, sizeof(packet));
+#endif
+}
+
+bool SyncManager::sendPowerDiag(uint32_t bootCount, uint32_t brownoutCount,
+                                uint8_t lastResetReason, bool recoveryActive,
+                                uint32_t uptimeMs)
+{
+#if DEVICE_ROLE == DEVICE_ROLE_NODE
+  ESPNowPowerDiagPacket packet;
+  memset(&packet, 0, sizeof(packet));
+  packet.type = POWER_DIAG_PACKET;
+  packet.nodeId = nodeId;
+  packet.lastResetReason = lastResetReason;
+  packet.recoveryActive = recoveryActive ? 1 : 0;
+  packet.bootCount = bootCount;
+  packet.brownoutCount = brownoutCount;
+  packet.uptimeMs = uptimeMs;
+
+  esp_err_t err = esp_now_send(gatewayMac, (uint8_t *)&packet, sizeof(packet));
+  if (err != ESP_OK)
+  {
+    Serial.printf("[PowerDiag] send failed: 0x%X\n", err);
+    return false;
+  }
+  return true;
+#else
+  (void)bootCount;
+  (void)brownoutCount;
+  (void)lastResetReason;
+  (void)recoveryActive;
+  (void)uptimeMs;
+  return false;
+#endif
+}
+
+bool SyncManager::sendTDMADiag(uint32_t uptimeMs)
+{
+#if DEVICE_ROLE == DEVICE_ROLE_NODE
+  uint16_t intervalMs = 0;
+  uint16_t txAttempts = 0;
+  uint16_t txSuccess = 0;
+  uint16_t txFail = 0;
+  uint16_t txStallClears = 0;
+  uint16_t staleIncompleteDrops = 0;
+  uint8_t maxQueueDepth = 0;
+  uint32_t currentFrame = 0;
+  bool localTxPending = false;
+
+  portENTER_CRITICAL(&syncStateLock);
+  localTxPending = txPending;
+  const uint32_t nowMs = millis();
+  intervalMs = tdmaDiagLastReportMs > 0
+                   ? (uint16_t)min<uint32_t>(nowMs - tdmaDiagLastReportMs, 65535)
+                   : 0;
+  txAttempts = tdmaDiagTxAttempts;
+  txSuccess = tdmaDiagTxSuccess;
+  txFail = tdmaDiagTxFail;
+  txStallClears = tdmaDiagTxStallClears;
+  staleIncompleteDrops = tdmaDiagStaleIncompleteDrops;
+  maxQueueDepth = tdmaDiagMaxQueueDepth;
+  currentFrame = currentFrameNumber;
+  portEXIT_CRITICAL(&syncStateLock);
+
+  if (localTxPending)
+  {
+    return false;
+  }
+
+  ESPNowTDMADiagPacket packet;
+  memset(&packet, 0, sizeof(packet));
+  packet.type = TDMA_DIAG_PACKET;
+  packet.nodeId = nodeId;
+  packet.intervalMs = intervalMs;
+  packet.txAttempts = txAttempts;
+  packet.txSuccess = txSuccess;
+  packet.txFail = txFail;
+  packet.txStallClears = txStallClears;
+  packet.staleIncompleteDrops = staleIncompleteDrops;
+  packet.maxQueueDepth = maxQueueDepth;
+  packet.currentFrame = currentFrame;
+
+  esp_err_t err = esp_now_send(gatewayMac, (uint8_t *)&packet, sizeof(packet));
+  if (err != ESP_OK)
+  {
+    return false;
+  }
+
+  portENTER_CRITICAL(&syncStateLock);
+  tdmaDiagLastReportMs = millis();
+  tdmaDiagTxAttempts = 0;
+  tdmaDiagTxSuccess = 0;
+  tdmaDiagTxFail = 0;
+  tdmaDiagTxStallClears = 0;
+  tdmaDiagStaleIncompleteDrops = 0;
+  tdmaDiagMaxQueueDepth = 0;
+  portEXIT_CRITICAL(&syncStateLock);
+  return true;
+#else
+  (void)uptimeMs;
+  return false;
 #endif
 }
 

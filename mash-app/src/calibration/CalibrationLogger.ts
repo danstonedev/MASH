@@ -9,6 +9,8 @@
  * Data is stored locally and can be exported as JSON.
  */
 
+import { downloadBlobPart } from "../lib/export/download";
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -311,16 +313,11 @@ class CalibrationLogger {
    */
   async downloadExport(): Promise<void> {
     const data = await this.exportForML();
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `calibration-log-${Date.now()}.json`;
-    a.click();
-
-    URL.revokeObjectURL(url);
+    await downloadBlobPart(
+      JSON.stringify(data),
+      `calibration-log-${Date.now()}.json`,
+      "application/json",
+    );
   }
 
   /**

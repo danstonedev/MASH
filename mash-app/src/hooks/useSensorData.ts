@@ -38,7 +38,7 @@ const getPlaybackSensorId = (deviceId: string): number => {
  * "The Single Source of Truth for Sensor Data."
  *
  * Abstracts away the difference between:
- * 1. Live Bluetooth Data (High-performance Cache)
+ * 1. Live Serial Data (High-performance Cache)
  * 2. Recorded Playback Data (Frame-by-frame)
  *
  * Returns standardized data for visualization components.

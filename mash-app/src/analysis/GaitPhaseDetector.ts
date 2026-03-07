@@ -14,6 +14,8 @@ import type { GaitPhaseState, GaitPhaseType } from "./MovementPhase";
 export class GaitPhaseDetector {
   private currentPhase: GaitPhaseType = "unknown";
   private lastPhaseChange: number = 0;
+  private lastStrideDuration: number = 1000; // ms, initial estimate ~1s stride
+  private lastStrideStart: number = 0;
 
   constructor() {}
 
@@ -59,14 +61,30 @@ export class GaitPhaseDetector {
     // We leave it as 'stance' but the Activity Classifier will override to 'Standing' based on energy.
 
     if (newPhase !== this.currentPhase) {
+      // Track stride timing on heel_strike (start of gait cycle)
+      if (newPhase === "heel_strike" && this.lastStrideStart > 0) {
+        const strideDur = timestamp - this.lastStrideStart;
+        if (strideDur > 300 && strideDur < 3000) {
+          this.lastStrideDuration = strideDur;
+        }
+      }
+      if (newPhase === "heel_strike") {
+        this.lastStrideStart = timestamp;
+      }
       this.currentPhase = newPhase;
       this.lastPhaseChange = timestamp;
     }
 
+    // Estimate progress through current stride cycle (0-1)
+    const elapsed = this.lastStrideStart > 0 ? timestamp - this.lastStrideStart : 0;
+    const progress = this.lastStrideDuration > 0
+      ? Math.min(1, elapsed / this.lastStrideDuration)
+      : 0;
+
     return {
       phase: this.currentPhase,
       confidence: contactConfidence,
-      progress: 0, // TODO: Estimate progress based on stride time history
+      progress,
       timestamp,
     };
   }
@@ -74,5 +92,7 @@ export class GaitPhaseDetector {
   reset() {
     this.currentPhase = "unknown";
     this.lastPhaseChange = 0;
+    this.lastStrideDuration = 1000;
+    this.lastStrideStart = 0;
   }
 }

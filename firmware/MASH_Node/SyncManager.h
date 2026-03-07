@@ -50,9 +50,6 @@ class SensorManager;
 class OTAManager;
 class PowerStateManager;
 
-// Callback type for receiving IMU data (Gateway mode)
-typedef std::function<void(const ESPNowDataPacket &packet)> DataRecvCallback;
-
 // Callback type for OTA ACK response (Node -> Gateway)
 typedef std::function<void(const ESPNowOTAAckPacket &ack)> OTAAckCallback;
 
@@ -118,6 +115,14 @@ public:
 
   // Send Magnetometer calibration progress (Node mode)
   void sendMagCalibProgress(SensorManager &sm);
+
+  // Send one-shot power diagnostics (Node mode)
+  bool sendPowerDiag(uint32_t bootCount, uint32_t brownoutCount,
+                     uint8_t lastResetReason, bool recoveryActive,
+                     uint32_t uptimeMs);
+
+  // Send periodic TDMA transport diagnostics (Node mode)
+  bool sendTDMADiag(uint32_t uptimeMs);
 
   // Set callback for received data (Gateway mode)
   // Callback takes generic payload, len to support multiple types
@@ -377,14 +382,16 @@ private:
   uint32_t consecutiveSendFailures; // Consecutive failures for Zombie detection
   BufferPolicy currentBufferPolicy; // Policy for handling buffer overflows
 
-  // ============================================================================
-  // PHASE 4: Node-Side Delta Compression State
-  // ============================================================================
-  TDMABatchedSensorData
-      prevSample[MAX_SENSORS]; // Previous sample for delta calculation
-  bool prevSampleValid;        // True after first transmission (keyframe sent)
-  uint32_t deltaOverflowCount; // Track delta overflow occurrences
-  // ============================================================================
+  // Periodic TDMA transport diagnostics (delta counters between reports)
+  uint32_t tdmaDiagLastReportMs = 0;
+  uint16_t tdmaDiagTxAttempts = 0;
+  uint16_t tdmaDiagTxSuccess = 0;
+  uint16_t tdmaDiagTxFail = 0;
+  uint16_t tdmaDiagTxStallClears = 0;
+  uint16_t tdmaDiagStaleIncompleteDrops = 0;
+  uint8_t tdmaDiagMaxQueueDepth = 0;
+
+  // SIMP-3: Delta compression state removed — all transmissions are keyframe-only
 
   // ============================================================================
   // PIPELINED PACKET BUILDING (Parallelization Optimization)
@@ -483,8 +490,7 @@ void pinEspNowPhyRate(const uint8_t *peerMac);
 size_t buildTDMAPacket(uint8_t *packet,
                        const TDMABatchedSensorData (*frameSamples)[MAX_SENSORS],
                        uint8_t frameSampleCount, uint8_t sensorCount,
-                       uint32_t frameNumber, TDMABatchedSensorData *prevSample,
-                       bool &prevSampleValid, uint32_t &deltaOverflowCount,
+                       uint32_t frameNumber,
                        uint8_t nodeId, uint8_t syncProtocolVersion,
                        uint16_t lastRttUs, uint32_t timeSinceLastSync,
                        bool twoWaySyncActive, uint8_t &samplesConsumed);

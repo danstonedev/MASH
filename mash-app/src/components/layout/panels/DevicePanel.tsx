@@ -12,9 +12,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as THREE from "three";
 import {
-  Bluetooth,
   Usb,
-  Power,
   RefreshCw,
   RotateCcw,
   Target,
@@ -50,8 +48,12 @@ import { CervicalCalibrationPanel } from "./CervicalCalibrationPanel";
 import { LateJoinBanner } from "../../ui/LateJoinBanner";
 import { TopologyType } from "../../../biomech/topology/SensorRoles";
 import { STEP_DURATIONS } from "../../../calibration/calibrationStepConfig";
+import {
+  buildCalibrationPreflightModel,
+  buildSetupStatusModel,
+  computeAssignmentStepComplete,
+} from "./setupFlowStatus";
 
-const CALIBRATION_MIN_TRUE_SYNC_RATE = 90;
 const CALIBRATION_MIN_ALIVE_NODES = 1;
 const FULL_BODY_REQUIRED_SEGMENTS = [
   "pelvis",
@@ -456,9 +458,11 @@ export function DevicePanel() {
     isConnected,
     isScanning,
     lastKnownDevice,
-    connectionType,
+    syncPhase,
     syncReady,
     syncState,
+    discoveryLocked,
+    pendingNodes,
   } = useDeviceStore();
 
   // Use unified assignment store
@@ -495,6 +499,7 @@ export function DevicePanel() {
     let count = 0;
     state.devices.forEach((device, id) => {
       if (!device.isConnected) return;
+      if (device.connectionHealth === "offline") return;
       count++;
     });
     return count;
@@ -517,6 +522,9 @@ export function DevicePanel() {
       ? topologySensorCount
       : connectedSensorCountFromRegistry;
 
+  const aliveNodeCount =
+    syncState?.nodes.filter((node) => node.alive).length || 0;
+
   // Topology detection
   const topologyResult: TopologyDetectionResult | null = useMemo(() => {
     const segments = Array.from(assignments.values()).map((a) => a.segmentId);
@@ -525,6 +533,7 @@ export function DevicePanel() {
   }, [assignments]);
 
   const detectedTopology = topologyResult?.topology || activeTopology;
+  const isFullBodyFlow = detectedTopology === TopologyType.FULL_BODY;
 
   // Subscribe to device registry changes to trigger auto-assignment
   // This ensures auto-assign runs when new devices connect
@@ -532,81 +541,101 @@ export function DevicePanel() {
     (state) => state.devices.size,
   );
 
-  const calibrationPreflight = useMemo(() => {
-    const assignedCount = assignments.size;
-    const aliveNodes =
-      syncState?.nodes.filter((node) => node.alive).length || 0;
-    const trueSyncRate = syncState?.syncBuffer.trueSyncRate || 0;
-
-    const connectedAssignedSegments = new Set<string>();
+  const connectedAssignedSegments = useMemo(() => {
+    const segments = new Set<string>();
     const deviceRegistry = useDeviceRegistry.getState().devices;
+
     assignments.forEach((assignment, deviceId) => {
-      if (deviceRegistry.has(deviceId)) {
-        connectedAssignedSegments.add(assignment.segmentId.toLowerCase());
-      }
+      const device = deviceRegistry.get(deviceId);
+      if (!device?.isConnected || device.connectionHealth === "offline") return;
+      segments.add(assignment.segmentId.toLowerCase());
     });
 
-    const isFullBodyFlow = detectedTopology === TopologyType.FULL_BODY;
-    const missingFullBodySegments = isFullBodyFlow
-      ? FULL_BODY_REQUIRED_SEGMENTS.filter(
-          (segmentId) => !connectedAssignedSegments.has(segmentId),
-        )
-      : [];
+    return segments;
+  }, [assignments, registeredDeviceCount]);
 
-    const checks = [
-      {
-        label: "Gateway connected",
-        passed: isConnected,
-        detail: isConnected ? "connected" : "offline",
-      },
-      {
-        label: "Assignments present",
-        passed: assignedCount > 0,
-        detail: `${assignedCount} assigned`,
-      },
-      {
-        label: "Sync readiness",
-        passed: syncReady,
-        detail: syncState?.phase || "idle",
-      },
-      {
-        label: `True sync ≥ ${CALIBRATION_MIN_TRUE_SYNC_RATE}%`,
-        passed: trueSyncRate >= CALIBRATION_MIN_TRUE_SYNC_RATE,
-        detail: `${trueSyncRate.toFixed(1)}%`,
-      },
-      {
-        label: `Alive nodes ≥ ${CALIBRATION_MIN_ALIVE_NODES}`,
-        passed: aliveNodes >= CALIBRATION_MIN_ALIVE_NODES,
-        detail: `${aliveNodes} alive`,
-      },
-    ];
+  const missingFullBodySegments = useMemo(() => {
+    if (!isFullBodyFlow) return [] as string[];
+    return FULL_BODY_REQUIRED_SEGMENTS.filter(
+      (segmentId) => !connectedAssignedSegments.has(segmentId),
+    );
+  }, [connectedAssignedSegments, isFullBodyFlow]);
 
-    if (isFullBodyFlow) {
-      checks.push({
-        label: "Full-body required segments",
-        passed: missingFullBodySegments.length === 0,
-        detail:
-          missingFullBodySegments.length === 0
-            ? `${FULL_BODY_REQUIRED_SEGMENTS.length}/${FULL_BODY_REQUIRED_SEGMENTS.length}`
-            : `${FULL_BODY_REQUIRED_SEGMENTS.length - missingFullBodySegments.length}/${FULL_BODY_REQUIRED_SEGMENTS.length}`,
-      });
-    }
+  const assignmentTargetCount =
+    topologySensorCount > 0
+      ? topologySensorCount
+      : connectedSensorCountFromRegistry;
 
-    const failedChecks = checks.filter((check) => !check.passed);
-
-    return {
-      checks,
-      failedChecks,
-      canStart: failedChecks.length === 0,
+  const assignmentStepComplete = useMemo(() => {
+    return computeAssignmentStepComplete({
+      isConnected,
+      assignedCount: assignments.size,
+      isFullBodyFlow,
       missingFullBodySegments,
-    };
+      assignmentTargetCount,
+    });
   }, [
-    assignments,
-    detectedTopology,
+    assignmentTargetCount,
+    assignments.size,
     isConnected,
-    registeredDeviceCount,
+    isFullBodyFlow,
+    missingFullBodySegments.length,
+  ]);
+
+  const calibrationPreflight = useMemo(() => {
+    return buildCalibrationPreflightModel({
+      isConnected,
+      assignedCount: assignments.size,
+      syncReady,
+      syncPhase: syncState?.phase || syncPhase || "idle",
+      aliveNodeCount,
+      minAliveNodes: CALIBRATION_MIN_ALIVE_NODES,
+      pendingNodeCount: pendingNodes.length,
+      isFullBodyFlow,
+      requiredSegmentCount: FULL_BODY_REQUIRED_SEGMENTS.length,
+      missingFullBodySegments,
+    });
+  }, [
+    aliveNodeCount,
+    assignments,
+    isConnected,
+    isFullBodyFlow,
+    missingFullBodySegments,
+    pendingNodes.length,
     syncReady,
-    syncState,
+    syncPhase,
+    syncState?.phase,
+  ]);
+
+  const setupStatus = useMemo(() => {
+    return buildSetupStatusModel({
+      isConnected,
+      syncReady,
+      syncPhase,
+      aliveNodeCount,
+      connectedSensorCount,
+      assignmentStepComplete,
+      isFullBodyFlow,
+      requiredSegmentCount: FULL_BODY_REQUIRED_SEGMENTS.length,
+      missingFullBodySegments,
+      assignmentTargetCount,
+      assignedCount: assignments.size,
+      discoveryLocked,
+      pendingNodeCount: pendingNodes.length,
+    });
+  }, [
+    aliveNodeCount,
+    assignmentStepComplete,
+    assignmentTargetCount,
+    assignments.size,
+    connectedSensorCount,
+    discoveryLocked,
+    isConnected,
+    isFullBodyFlow,
+    missingFullBodySegments,
+    pendingNodes.length,
+    syncPhase,
+    syncReady,
   ]);
 
   // Auto-Assign Logic: When new devices appear, try to assign them
@@ -635,7 +664,6 @@ export function DevicePanel() {
 
       // 1. Try Provisioned Name
       if (autoAssignByName(device.id, device.name)) {
-        console.debug(`[AutoAssign] Assigned ${device.name} by name`);
         return;
       }
     });
@@ -660,14 +688,6 @@ export function DevicePanel() {
       unifiedCalibration.processFrame(deltaTime);
       const state = unifiedCalibration.getState();
 
-      // Log step transitions
-      if (state.step !== unifiedState?.step) {
-        console.debug(
-          `[Calibration] Step: ${unifiedState?.step || "idle"} → ${state.step}`,
-          `| progress: ${(state.stepProgress * 100).toFixed(0)}%, quality: ${state.overallQuality.toFixed(0)}%`,
-        );
-      }
-
       setUnifiedState(state);
 
       if (state.step === "complete") {
@@ -675,11 +695,6 @@ export function DevicePanel() {
         setActiveRetryRegions([]);
         setCalibrationStep("calibrated");
 
-        // DIAGNOSTIC: Log calibration results
-        console.debug(
-          "[DevicePanel] Calibration COMPLETE. Results count:",
-          state.results.size,
-        );
         if (state.results.size === 0) {
           console.error(
             "[DevicePanel] WARNING: No calibration results! This will break bone orientation.",
@@ -710,9 +725,6 @@ export function DevicePanel() {
         // Apply SARA joint constraints to FK solver
         const jointConstraints = unifiedCalibration.getJointConstraints();
         if (jointConstraints.size > 0) {
-          console.debug(
-            `[DevicePanel] Applying ${jointConstraints.size} SARA joint constraints to FK solver`,
-          );
           jointConstraints.forEach((constraint, jointId) => {
             // Find the distal bone for this joint
             const jointDef = JOINT_PAIRS.find((j) => j.jointId === jointId);
@@ -733,9 +745,6 @@ export function DevicePanel() {
 
         // NEW: Auto-Scaling Verification (Log Bone Lengths)
         if (state.scoreResults && state.scoreResults.size > 0) {
-          console.debug(
-            `[DevicePanel] SCoRE Results available: ${state.scoreResults.size}. Calculating bone lengths...`,
-          );
           const scoreResults = state.scoreResults;
 
           // Define segments to measure (Simplified for leg)
@@ -777,9 +786,6 @@ export function DevicePanel() {
               const p2 = distJoint.jointCenterProximal;
 
               const length = p1.distanceTo(p2);
-              console.debug(
-                `[AutoCal] Scaled ${seg.name}: ${length.toFixed(1)}mm (Confidence: ${((proxJoint.confidence + distJoint.confidence) / 2).toFixed(2)})`,
-              );
             }
           });
         }
@@ -828,9 +834,6 @@ export function DevicePanel() {
         currentState.step !== "complete" &&
         currentState.step !== "error"
       ) {
-        console.debug(
-          "[DevicePanel] Unmounting during active calibration - cancelling",
-        );
         unifiedCalibration.cancel();
       }
     };
@@ -849,8 +852,6 @@ export function DevicePanel() {
 
     setPreflightError(null);
 
-    console.debug(`[DevicePanel] CALIBRATION START`);
-
     // CRITICAL: Ensure we have the model's bind pose targets
     if (!targetNeutralPose || targetNeutralPose.size === 0) {
       console.error(
@@ -861,9 +862,6 @@ export function DevicePanel() {
 
     setCalibrationMode("research_strict");
     setActiveRetryRegions([]);
-    console.debug(
-      `[DevicePanel] Topology: ${detectedTopology}, Assignments: ${assignments.size}, Mode: research_strict`,
-    );
     setIsCalibrating(true);
 
     // RESET: Ensure a clean slate for calibration (prevent accumulated tares)
@@ -1029,6 +1027,9 @@ export function DevicePanel() {
     if (assignments.size === 0) {
       reasons.push("No sensors are assigned to body segments.");
     }
+    if (pendingNodes.length > 0) {
+      reasons.push("Late-joining nodes still need to be accepted or ignored.");
+    }
     if (isConnected && assignments.size > 0 && !calibrationPreflight.canStart) {
       reasons.push("Calibration preflight checks are incomplete.");
     }
@@ -1084,6 +1085,7 @@ export function DevicePanel() {
     isCalibrated,
     isConnected,
     overallQuality,
+    pendingNodes.length,
     functionalCheckWarnings,
     hasFunctionalCheckFailure,
     timelineWarnings.length,
@@ -1205,11 +1207,7 @@ export function DevicePanel() {
       <div className="px-4 py-3 border-b border-white/10">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            {connectionType === "serial" ? (
-              <Usb className="h-4 w-4 text-accent" />
-            ) : (
-              <Bluetooth className="h-4 w-4 text-accent" />
-            )}
+            <Usb className="h-4 w-4 text-accent" />
             <span className="text-sm font-semibold text-white">
               Quick Start
             </span>
@@ -1247,20 +1245,12 @@ export function DevicePanel() {
               </>
             ) : hasKnownDevice ? (
               <>
-                {connectionType === "serial" ? (
-                  <Usb className="h-4 w-4 mr-2" />
-                ) : (
-                  <Bluetooth className="h-4 w-4 mr-2" />
-                )}
+                <Usb className="h-4 w-4 mr-2" />
                 Reconnect
               </>
             ) : (
               <>
-                {connectionType === "serial" ? (
-                  <Usb className="h-4 w-4 mr-2" />
-                ) : (
-                  <Bluetooth className="h-4 w-4 mr-2" />
-                )}
+                <Usb className="h-4 w-4 mr-2" />
                 Connect Gateway
               </>
             )}
@@ -1273,12 +1263,88 @@ export function DevicePanel() {
         {/* Late-join pending nodes banner */}
         {isConnected && <LateJoinBanner />}
 
+        <div
+          className={cn(
+            "rounded-lg border p-3",
+            setupStatus.level === "ready"
+              ? "border-success/30 bg-success/10"
+              : setupStatus.level === "warning"
+                ? "border-warning/30 bg-warning/10"
+                : "border-white/10 bg-white/5",
+          )}
+        >
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-white/85">
+              Setup Status
+            </div>
+            <span
+              className={cn(
+                "text-[10px] px-2 py-0.5 rounded-full border font-semibold",
+                setupStatus.level === "ready"
+                  ? "border-success/30 bg-success/15 text-success"
+                  : setupStatus.level === "warning"
+                    ? "border-warning/30 bg-warning/15 text-warning"
+                    : "border-white/15 bg-white/10 text-white/60",
+              )}
+            >
+              {setupStatus.level === "ready"
+                ? "Ready"
+                : setupStatus.level === "warning"
+                  ? "In Progress"
+                  : "Blocked"}
+            </span>
+          </div>
+
+          <p className="text-[10px] text-white/80 mb-2">
+            {setupStatus.summary}
+          </p>
+
+          <div className="space-y-1.5">
+            {setupStatus.rows.map((row) => (
+              <div
+                key={row.label}
+                className="flex items-center justify-between gap-2 text-[10px]"
+              >
+                <div className="flex items-center gap-1.5 text-white/80">
+                  {row.passed ? (
+                    <CheckCircle className="h-3 w-3 text-success" />
+                  ) : (
+                    <AlertTriangle className="h-3 w-3 text-warning" />
+                  )}
+                  <span>{row.label}</span>
+                </div>
+                <span
+                  className={cn(
+                    "font-medium",
+                    row.passed ? "text-success" : "text-white/60",
+                  )}
+                >
+                  {row.detail}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {setupStatus.blockers.length > 1 && (
+            <div className="mt-2 space-y-1">
+              {setupStatus.blockers.slice(1, 3).map((blocker, index) => (
+                <div
+                  key={`${blocker}-${index}`}
+                  className="text-[9px] text-white/55"
+                >
+                  {blocker}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Step 1: Assign Sensors */}
         <Section
           step={1}
           title="Assign Sensors"
-          completed={hasAssignments}
-          active={isConnected && !hasAssignments}
+          completed={assignmentStepComplete}
+          active={isConnected && !assignmentStepComplete}
           rightContent={
             <span className="text-[10px] font-semibold text-white/80">
               {connectedSensorCount} Connected
@@ -1286,7 +1352,22 @@ export function DevicePanel() {
           }
         >
           {isConnected ? (
-            <SensorAssignmentPanel />
+            <SensorAssignmentPanel
+              emptyStateTitle={
+                syncReady
+                  ? "No sensors available for assignment"
+                  : "Waiting for sensor discovery"
+              }
+              emptyStateDescription={
+                syncReady
+                  ? "The gateway is connected, but no assignable topology is visible yet."
+                  : `Gateway connected. ${
+                      syncPhase === "idle"
+                        ? "Starting discovery."
+                        : `Current sync phase: ${syncPhase}.`
+                    }`
+              }
+            />
           ) : (
             <p className="text-[10px] text-white/40">
               Connect to assign sensors

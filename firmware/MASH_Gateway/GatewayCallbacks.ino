@@ -31,6 +31,56 @@ void showStartupAnimation()
 }
 
 // ============================================================================
+// TDMA-STATE-DRIVEN LED UPDATE (called from loop() at ~4Hz)
+// ============================================================================
+// Gateway NeoPixel colors match the display banner for consistency:
+//   Yellow (solid)      = Initializing (boot only)
+//   Blue (breathing)    = DISCOVERY — waiting for nodes
+//   Magenta (solid)     = SYNC — distributing TDMA slots
+//   Green (solid)       = RUNNING + streaming (actively recording)
+//   Cyan (solid)        = RUNNING + standby (warm standby)
+//   Purple (solid)      = IDLE — TDMA not started
+// ============================================================================
+void updateGatewayLED()
+{
+    if (!boardHasNeoPixel)
+        return;
+
+    TDMAState state = syncManager.getTDMAState();
+
+    switch (state)
+    {
+    case TDMA_STATE_IDLE:
+        setStatusColor(30, 0, 30); // Purple = idle
+        break;
+
+    case TDMA_STATE_DISCOVERY:
+    {
+        // Blue breathing (2-second triangle wave, 5-80 range for visibility)
+        uint16_t phase = millis() % 2000;
+        uint8_t brightness;
+        if (phase < 1000)
+            brightness = (uint8_t)(5 + phase * 75 / 1000);
+        else
+            brightness = (uint8_t)(5 + (2000 - phase) * 75 / 1000);
+        setStatusColor(0, 0, brightness);
+        break;
+    }
+
+    case TDMA_STATE_SYNC:
+        setStatusColor(40, 0, 40); // Magenta = distributing slots
+        break;
+
+    case TDMA_STATE_RUNNING:
+        if (isStreaming)
+            setStatusColor(0, 50, 0); // Green = streaming
+        else
+            setStatusColor(0, 40, 40); // Cyan = warm standby
+        break;
+    }
+}
+
+// ============================================================================
 // Command Callbacks (Gateway-specific - limited functionality)
 // ============================================================================
 
@@ -38,11 +88,11 @@ void onStartStreaming()
 {
     if (!isStreaming)
     {
-        Serial.println("[Gateway] Streaming enabled");
+        SAFE_PRINTLN("[Gateway] Streaming enabled");
     }
     isStreaming = true;
     suppressSerialLogs = true;
-    setStatusColor(0, 50, 50); // Cyan = Gateway streaming
+    // LED color driven by updateGatewayLED() — no manual set here
 
     // ============================================================================
     // DEFERRED SYNC RESET: Don't fire immediately — wait until TDMA is RUNNING
@@ -66,7 +116,7 @@ void onStartStreaming()
     }
     else
     {
-        Serial.println(
+        SAFE_PRINTLN(
             "[TDMA] Already running - preserving existing node registrations");
     }
     // ============================================================================
@@ -88,16 +138,16 @@ void onStartStreaming()
         {
             syncFrameBuffer.init(expectedSensorIds, sensorCount);
             syncFrameBufferInitialized = true;
-            Serial.printf("[SyncFrame] Initialized with %d sensors: ", sensorCount);
+            SAFE_LOG("[SyncFrame] Initialized with %d sensors: ", sensorCount);
             for (uint8_t i = 0; i < sensorCount; i++)
             {
-                Serial.printf("%d ", expectedSensorIds[i]);
+                SAFE_LOG("%d ", expectedSensorIds[i]);
             }
-            Serial.println();
+            SAFE_PRINTLN("");
         }
         else
         {
-            Serial.println(
+            SAFE_PRINTLN(
                 "[SyncFrame] WARNING: No sensors registered yet - will retry");
             syncFrameBufferInitialized = false;
         }
@@ -109,8 +159,8 @@ void onStopStreaming()
 {
     isStreaming = false;
     suppressSerialLogs = false;
-    setStatusColor(50, 0, 50); // Purple = Gateway idle
-    Serial.println("[Gateway] Streaming disabled");
+    // LED color driven by updateGatewayLED() — no manual set here
+    SAFE_PRINTLN("[Gateway] Streaming disabled");
 
     syncManager.setStreaming(false);
     pendingSyncReset = false; // Cancel any pending deferred sync reset
@@ -127,7 +177,7 @@ void onStopStreaming()
     {
         syncFrameBuffer.reset();
         syncFrameBufferInitialized = false;
-        Serial.println("[SyncFrame] Buffer reset");
+        SAFE_PRINTLN("[SyncFrame] Buffer reset");
     }
 
     // BLE radio mode commands removed — nodes run TDMA-only (ENABLE_BLE=0)
@@ -340,6 +390,19 @@ void onTDMARescan()
     syncManager.restartDiscovery();
 }
 
+void onClearTopology()
+{
+    SAFE_PRINTLN("[CMD] CLEAR_TOPOLOGY received - erasing NVS topology & restarting discovery");
+    syncManager.clearPersistedTopology();
+    syncManager.restartDiscovery();
+}
+
+void onSetExpectedNodes(uint8_t count)
+{
+    SAFE_LOG("[CMD] SET_EXPECTED_NODES received: %d\n", count);
+    syncManager.setExpectedNodeCount(count);
+}
+
 bool onAcceptNode(uint8_t nodeId)
 {
     bool ok = syncManager.acceptPendingNode(nodeId);
@@ -348,7 +411,8 @@ bool onAcceptNode(uint8_t nodeId)
         // Trigger deferred sync reset so the new node's data gets
         // incorporated into the SyncFrameBuffer cleanly
         pendingSyncReset = true;
-        syncFrameBuffer.reset();
+        // NOTE: Do NOT call syncFrameBuffer.reset() here — deferred path fires
+        // ONE reset after TDMA reaches RUNNING, preserving trueSyncRate stats.
     }
     return ok;
 }

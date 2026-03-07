@@ -204,6 +204,11 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     const now = Date.now();
     registerNodeId(nodeId);
 
+    // LIFECYCLE LOG: Node registration event
+    console.info(
+      `[CONN:LIFECYCLE] REGISTER node: id=${nodeId} name="${name}" sensors=${sensorCount} rawNodeId=${rawNodeId ?? "n/a"} hasMag=${hasMag} hasBaro=${hasBaro}`,
+    );
+
     // PHASE-1: Track rawNodeId → compactBase mapping
     if (rawNodeId !== undefined && rawNodeId > 0) {
       _rawToCompactNodeMap.set(rawNodeId, nodeId);
@@ -322,6 +327,9 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
         //   offline, so the UI topology doesn't churn during packet jitter.
         // - Only prune stale placeholder nodes that never resolved.
         if (isPlaceholder && ageMs > PRUNE_THRESHOLD_MS) {
+          console.info(
+            `[CONN:LIFECYCLE] PRUNE node: id=${nodeId} (placeholder, no sensors, stale ${(ageMs / 1000).toFixed(1)}s)`,
+          );
           nodes.delete(nodeId);
 
           // NOTE: We intentionally do NOT delete _sensorToNodeMap entries here.

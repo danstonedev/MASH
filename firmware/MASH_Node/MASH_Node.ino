@@ -4,7 +4,7 @@
  * This firmware is specifically for Node devices that:
  * - Read IMU sensors locally
  * - Send data to Gateway via ESP-NOW
- * - TDMA-only operation (BLE disabled for maximum throughput)
+ * - TDMA-only operation for maximum throughput
  *
  * Hardware: Adafruit QT Py ESP32-S3 + ICM20649 sensors via TCA9548A
  ******************************************************************************/
@@ -13,16 +13,6 @@
 // Node Role Configuration (MUST be before Config.h)
 // ============================================================================
 #define DEVICE_ROLE DEVICE_ROLE_NODE
-
-// ============================================================================
-// BLE DISABLED: BLE stack consumes ~30-40KB heap and 1-3ms per notification,
-// which steals from the 5ms sensor budget at 200Hz. Since all data flows via
-// ESP-NOW → Gateway → USB Serial, BLE provides no value during operation.
-// Set to 1 to re-enable for standalone debug/calibration without a gateway.
-// ============================================================================
-#ifndef ENABLE_BLE
-#define ENABLE_BLE 0
-#endif
 
 // NOTE: SENSOR_ID_OFFSET is now calculated at runtime from MAC address
 // Each node automatically gets a unique ID - no manual editing required!
@@ -42,9 +32,6 @@
 #include <esp_wifi.h>
 
 // Include MASH modules
-#if ENABLE_BLE
-#include "BLEManager.h"
-#endif
 #include "CommandHandler.h"
 #include "OTAManager.h"
 #include "PowerStateManager.h"
@@ -62,9 +49,6 @@
 Preferences preferences;
 SyncManager syncManager;
 SensorManager sensorManager;
-#if ENABLE_BLE
-BLEManager bleManager;
-#endif
 WiFiManagerESP wifiManager;
 WebSocketManager wsManager;
 CommandHandler commandHandler;
@@ -91,8 +75,145 @@ static const unsigned long POWER_DOWN_GRACE_MS = 3000; // 3-second grace period
 static bool powerDownPending = false;
 static unsigned long powerDownScheduledAt = 0;
 
+// ============================================================================
+// POWER RESILIENCE / DIAGNOSTICS
+// ============================================================================
+// Stores reboot counters in NVS and applies a temporary low-stress profile
+// after brownout resets to avoid reset loops on weak battery rails.
+// ============================================================================
+static const uint32_t BROWNOUT_RECOVERY_WINDOW_MS = 15000;
+static const char *POWER_DIAG_NAMESPACE = "power_diag";
+static bool brownoutRecoveryActive = false;
+static uint32_t brownoutRecoveryUntilMs = 0;
+static uint32_t persistedBootCount = 0;
+static uint32_t persistedBrownoutCount = 0;
+static uint32_t persistedLastResetReason = 0;
+static bool powerDiagPending = false;
+static uint32_t powerDiagLastSendMs = 0;
+
+void updatePowerDiagnostics(esp_reset_reason_t resetReason)
+{
+  Preferences powerPrefs;
+  powerPrefs.begin(POWER_DIAG_NAMESPACE, false);
+
+  uint32_t bootCount = powerPrefs.getUInt("boots", 0) + 1;
+  uint32_t brownoutCount = powerPrefs.getUInt("brownouts", 0);
+  if (resetReason == ESP_RST_BROWNOUT)
+  {
+    brownoutCount++;
+  }
+
+  powerPrefs.putUInt("boots", bootCount);
+  powerPrefs.putUInt("brownouts", brownoutCount);
+  powerPrefs.putUInt("lastReason", (uint32_t)resetReason);
+  powerPrefs.end();
+
+  persistedBootCount = bootCount;
+  persistedBrownoutCount = brownoutCount;
+  persistedLastResetReason = (uint32_t)resetReason;
+  powerDiagPending = true;
+}
+
+bool isBrownoutRecoveryActive()
+{
+  if (!brownoutRecoveryActive)
+  {
+    return false;
+  }
+
+  const int32_t remainingMs = (int32_t)(brownoutRecoveryUntilMs - millis());
+  if (remainingMs <= 0)
+  {
+    brownoutRecoveryActive = false;
+    Serial.println("[PowerPolicy] Brownout recovery window complete");
+    return false;
+  }
+
+  return true;
+}
+
+void applyNodeRadioPolicy(const char *reason)
+{
+  // Quarter-dBm units for ESP-IDF API (34 => 8.5 dBm, 52 => 13 dBm)
+  const int8_t TX_PWR_RECOVERY = 34;
+  const int8_t TX_PWR_STANDBY = 40;
+  const int8_t TX_PWR_STREAMING = 52;
+
+  const bool synced = syncManager.isTDMASynced();
+  const bool gatewayStreaming = syncManager.isGatewayStreaming();
+  const bool inRecovery = isBrownoutRecoveryActive();
+
+  int8_t targetTxPower = TX_PWR_RECOVERY;
+  wifi_ps_type_t targetPs = WIFI_PS_MIN_MODEM;
+
+  if (synced && gatewayStreaming && !inRecovery)
+  {
+    targetTxPower = TX_PWR_STREAMING;
+    targetPs = WIFI_PS_NONE;
+  }
+  else if (synced && !inRecovery)
+  {
+    targetTxPower = TX_PWR_STANDBY;
+    targetPs = WIFI_PS_MIN_MODEM;
+  }
+
+  static int8_t lastTxPower = -1;
+  static int lastPs = -1;
+
+  if (targetTxPower != lastTxPower)
+  {
+    esp_err_t txErr = esp_wifi_set_max_tx_power(targetTxPower);
+    if (txErr == ESP_OK)
+    {
+      lastTxPower = targetTxPower;
+    }
+    else
+    {
+      Serial.printf("[PowerPolicy] TX power set failed (0x%X)\n", txErr);
+    }
+  }
+
+  if ((int)targetPs != lastPs)
+  {
+    esp_err_t psErr = esp_wifi_set_ps(targetPs);
+    if (psErr == ESP_OK)
+    {
+      lastPs = (int)targetPs;
+    }
+    else
+    {
+      Serial.printf("[PowerPolicy] WiFi PS set failed (0x%X)\n", psErr);
+    }
+  }
+
+  static uint32_t lastPolicyLog = 0;
+  if (millis() - lastPolicyLog > 3000)
+  {
+    const char *psName = (targetPs == WIFI_PS_NONE) ? "NONE" : "MIN_MODEM";
+    Serial.printf("[PowerPolicy] %s synced=%d stream=%d recovery=%d tx=%d ps=%s\n",
+                  reason, synced, gatewayStreaming, inRecovery, targetTxPower,
+                  psName);
+    lastPolicyLog = millis();
+  }
+}
+
 String deviceName;
 uint8_t nodeId = 0; // Unique node ID derived from MAC address at runtime
+
+// ============================================================================
+// LED STATUS STATE — Driven by TDMA lifecycle
+// ============================================================================
+// The NeoPixel reflects the node's actual connection state:
+//   Yellow (solid)      = Initializing sensors
+//   Blue (breathing)    = UNREGISTERED — searching for gateway
+//   Magenta (solid)     = REGISTERED — waiting for TDMA slot
+//   Green (solid)       = SYNCED + streaming (POWER_FULL)
+//   Cyan (solid)        = SYNCED + standby (POWER_LOW)
+//   Red (blinking)      = Lost sync — recovery in progress
+//   Red (solid)         = Fatal — no sensors found
+// ============================================================================
+volatile TDMANodeState tdmaLedState = TDMA_NODE_UNREGISTERED;
+volatile bool ledSyncLost = false; // true between UNREGISTERED transition and first re-register
 
 // ============================================================================
 // PROTOCOL TASK (Core 0) - Parallelization Optimization
@@ -198,8 +319,6 @@ void SensorTask(void *parameter)
       {
         syncManager.bufferSample(sensorManager);
       }
-
-      // BLE disabled (ENABLE_BLE=0) — saves 1-3ms per cycle at 200Hz
 
       // ====================================================================
       // OVERRUN TRACKING: Detect when task body exceeds sample period
@@ -353,20 +472,75 @@ void showStartupAnimation()
 }
 
 // ============================================================================
+// TDMA-STATE-DRIVEN LED UPDATE (called from loop() at native rate)
+// ============================================================================
+// Uses a triangle-wave breathing effect for the UNREGISTERED (searching) state
+// to visually distinguish "alive and searching" from "frozen".
+// Red blink for sync-lost recovery distinguishes it from first-boot searching.
+// ============================================================================
+void updateStatusLED()
+{
+  uint32_t now = millis();
+
+  if (ledSyncLost && tdmaLedState == TDMA_NODE_UNREGISTERED)
+  {
+    // RED BLINK — lost sync, recovery in progress (500ms on/500ms off)
+    bool on = (now / 500) % 2 == 0;
+    setStatusColor(on ? 50 : 0, 0, 0);
+    return;
+  }
+
+  if (tdmaLedState == TDMA_NODE_UNREGISTERED)
+  {
+    // BLUE BREATHING — searching for gateway (2-second cycle)
+    // Triangle wave with min brightness of 5 so it's never fully off
+    uint16_t phase = now % 2000;
+    uint8_t brightness;
+    if (phase < 1000)
+    {
+      brightness = (uint8_t)(5 + phase * 75 / 1000); // 5→80
+    }
+    else
+    {
+      brightness = (uint8_t)(5 + (2000 - phase) * 75 / 1000); // 80→5
+    }
+    setStatusColor(0, 0, brightness);
+    return;
+  }
+
+  if (tdmaLedState == TDMA_NODE_REGISTERED)
+  {
+    // MAGENTA (solid) — registered, waiting for slot assignment
+    setStatusColor(40, 0, 40);
+    return;
+  }
+
+  // TDMA_NODE_SYNCED — color depends on streaming vs standby
+  if (isStreaming)
+  {
+    setStatusColor(0, 50, 0); // GREEN = synced + streaming
+  }
+  else
+  {
+    setStatusColor(0, 40, 40); // CYAN = synced + standby
+  }
+}
+
+// ============================================================================
 // Command Callbacks
 // ============================================================================
 
 void onStartStreaming()
 {
   isStreaming = true;
-  setStatusColor(0, 50, 0); // Green = streaming
+  // LED color driven by updateStatusLED() — no manual set here
   Serial.println("[Node] Streaming started");
 }
 
 void onStopStreaming()
 {
   isStreaming = false;
-  setStatusColor(0, 50, 50); // Cyan = Node idle
+  // LED color driven by updateStatusLED() — no manual set here
   Serial.println("[Node] Streaming stopped");
 }
 
@@ -652,6 +826,20 @@ void setup()
   }
   Serial.printf("[DIAG] Reset reason: %s (%d)\n", resetReasonStr,
                 (int)resetReason);
+
+  updatePowerDiagnostics(resetReason);
+  if (resetReason == ESP_RST_BROWNOUT)
+  {
+    brownoutRecoveryActive = true;
+    brownoutRecoveryUntilMs = millis() + BROWNOUT_RECOVERY_WINDOW_MS;
+    Serial.printf("[PowerPolicy] Brownout recovery active for %lums\n",
+                  BROWNOUT_RECOVERY_WINDOW_MS);
+  }
+
+  Serial.printf("[DIAG] Persistent power stats: boots=%lu brownouts=%lu lastReason=%lu\n",
+                (unsigned long)persistedBootCount,
+                (unsigned long)persistedBrownoutCount,
+                (unsigned long)persistedLastResetReason);
   Serial.printf("[DIAG] Free heap: %lu bytes, min ever: %lu bytes\n",
                 (unsigned long)esp_get_free_heap_size(),
                 (unsigned long)esp_get_minimum_free_heap_size());
@@ -789,18 +977,6 @@ void setup()
   deviceName +=
       String(nodeId); // Use MAC-derived ID instead of hardcoded offset
 
-#if ENABLE_BLE
-  // Deferred BLE initialization (lazy init)
-  Serial.printf("[Setup] BLE deferred as '%s'\n", deviceName.c_str());
-  bleManager.setDeviceName(deviceName);
-  bleManager.setCommandCallback([](const String &cmd)
-                                {
-    String response = commandHandler.processCommand(cmd);
-    bleManager.sendResponse(response); });
-#else
-  Serial.println("[Setup] BLE DISABLED (ENABLE_BLE=0) — TDMA-only mode");
-#endif
-
   // Initialize WiFi
   WiFi.mode(WIFI_STA);
   // CRITICAL FIX: Disable WiFi Power Save MOVED to after Init
@@ -821,15 +997,6 @@ void setup()
   syncManager.setOTAManager(&otaManager);
 
   // ============================================================================
-  // CRITICAL FIX: Disable WiFi Power Save to prevent radio sleeping
-  // Default is WIFI_PS_MIN_MODEM which turns off radio between beacons.
-  // This causes 16ms+ TX stalls and packet drops in high-rate TDMA.
-  // MOVED HERE (v9) because syncManager.init() calls WiFi.mode() which resets
-  // it.
-  // ============================================================================
-  esp_wifi_set_ps(WIFI_PS_NONE);
-
-  // ============================================================================
   // POWER MANAGEMENT: Initialize power state manager (starts in LOW = 25Hz)
   // ============================================================================
   powerManager.init();
@@ -838,6 +1005,9 @@ void setup()
   Serial.printf("[Setup] Power state: %s (%dHz, %lu us)\n",
                 powerManager.getStateName(), powerManager.getSampleRateHz(),
                 sampleIntervalUs);
+
+  // Apply policy after all radio init calls (WiFi.mode/ESP-NOW) have settled.
+  applyNodeRadioPolicy("setup");
   // ============================================================================
 
   // WebSocket setup
@@ -846,22 +1016,10 @@ void setup()
     String response = commandHandler.processCommand(msg);
     wsManager.broadcast(response); });
 
-#if ENABLE_BLE
-  // Handle Radio Mode commands from Gateway
+  // Radio mode commands ignored — TDMA-only, no BLE
   syncManager.setRadioModeCallback([](uint8_t mode)
-                                   {
-    if (mode == 0)
-      bleManager.stopAdvertising();
-    else {
-      bleManager.ensureInitialized();
-      bleManager.startAdvertising();
-    } });
-#else
-  // BLE disabled — ignore radio mode commands from gateway
-  syncManager.setRadioModeCallback([](uint8_t mode)
-                                   { Serial.printf("[Node] Radio mode command %d ignored (BLE disabled)\n",
+                                   { Serial.printf("[Node] Radio mode command %d ignored (no BLE)\n",
                                                    mode); });
-#endif
 
   // Handle Calibration Commands (Mag & Gyro) from Gateway
   syncManager.setMagCalibCallback([](uint8_t cmdType, uint32_t param)
@@ -893,6 +1051,8 @@ void setup()
                                          {
     if (state == TDMA_NODE_SYNCED) {
       Serial.println("[Node] TDMA Synced");
+      tdmaLedState = TDMA_NODE_SYNCED;
+      ledSyncLost = false; // Clear sync-lost flag on successful sync
 
       // ========================================================================
       // POWER MANAGEMENT: Switch to FULL power state (200Hz) when synced
@@ -903,11 +1063,13 @@ void setup()
                        "cancelling power-down");
         powerDownPending = false;
       }
-      powerManager.requestState(POWER_FULL);
+      PowerState targetState = isBrownoutRecoveryActive() ? POWER_MED : POWER_FULL;
+      powerManager.requestState(targetState);
       sampleIntervalUs = powerManager.getSampleIntervalUs();
       // sensorManager.setFilterSampleFrequency(powerManager.getSampleRateHz());
       // // REMOVED
-      Serial.printf("[PowerState] SYNCED -> FULL (%dHz, %lu us interval)\n",
+      Serial.printf("[PowerState] SYNCED -> %s (%dHz, %lu us interval)\n",
+            powerManager.getStateName(),
                     powerManager.getSampleRateHz(), sampleIntervalUs);
       // ========================================================================
 
@@ -931,8 +1093,22 @@ void setup()
                        "Channel: UNKNOWN");
       }
 
+      applyNodeRadioPolicy("tdma_synced");
+
+    } else if (state == TDMA_NODE_REGISTERED) {
+      Serial.println("[Node] TDMA Registered (waiting for slot)");
+      tdmaLedState = TDMA_NODE_REGISTERED;
+      // Don't clear ledSyncLost — it transitions through REGISTERED on recovery
+
     } else if (state == TDMA_NODE_UNREGISTERED) {
+
+      applyNodeRadioPolicy("tdma_unregistered");
       Serial.println("[Node] TDMA Link Lost");
+      // If we were previously synced, mark as sync-lost for red blink
+      if (tdmaLedState == TDMA_NODE_SYNCED || tdmaLedState == TDMA_NODE_REGISTERED) {
+        ledSyncLost = true;
+      }
+      tdmaLedState = TDMA_NODE_UNREGISTERED;
 
       // ========================================================================
       // POWER MANAGEMENT: Schedule deferred power-down (hysteresis - MOD-4)
@@ -956,12 +1132,29 @@ void setup()
       }
       // ========================================================================
 
-      // PHASE 4 FIX: Re-enable WiFi Auto-Reconnect for debugging/OTA
-      if (wifiManager.hasSavedCredentials()) {
-        wifiManager.connectAsync();
-        // [TEST VERIFICATION LOG]
-        Serial.println(
-            "[Test] State: LOST -> WiFi: AUTO-RECONNECT ENABLED (Scanning...)");
+      // ========================================================================
+      // CRITICAL FIX: Do NOT call wifiManager.connectAsync() here!
+      // WiFi.begin() triggers channel scanning (hops through all 13 channels).
+      // While off-channel, ESP-NOW broadcast schedule packets are missed.
+      // This creates a persistent failure loop:
+      //   1. Node hears beacon (back on correct channel briefly)
+      //   2. Node sends registration → gateway broadcasts schedule
+      //   3. Node is scanning another channel → misses schedule
+      //   4. Node stays UNREGISTERED → repeat
+      // Instead, stop any existing WiFi connection and force the channel
+      // to stay locked so we can reliably receive the schedule broadcast.
+      // ========================================================================
+      wifiManager.stopConnection();
+      {
+        uint8_t channel = syncManager.getLastKnownChannel();
+        if (channel > 0) {
+          esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+          Serial.printf("[Test] State: LOST -> WiFi: STOPPED, Channel: %d "
+                        "(Locked for re-sync)\n", channel);
+        } else {
+          Serial.println("[Test] State: LOST -> WiFi: STOPPED, Channel: "
+                         "UNKNOWN (will use beacon channel)");
+        }
       }
     } });
 
@@ -1018,8 +1211,8 @@ void setup()
 #endif
   // ============================================================================
 
-  setStatusColor(0, 50, 0); // Green = streaming
-  Serial.println("\n[Setup] Node Ready and Streaming!");
+  // LED color now driven by updateStatusLED() based on TDMA state
+  Serial.println("\n[Setup] Node Ready!");
   Serial.println("========================================\n");
 }
 
@@ -1052,6 +1245,9 @@ void loop()
 
   syncManager.update();
 
+  // TDMA-state-driven LED (runs every loop iteration for smooth breathing)
+  updateStatusLED();
+
   // ============================================================================
   // WARM STANDBY: Toggle power state based on Gateway streaming status
   // ============================================================================
@@ -1063,7 +1259,10 @@ void loop()
   if (syncManager.isTDMASynced())
   {
     bool currentlyStreaming = syncManager.isGatewayStreaming();
-    PowerState targetState = currentlyStreaming ? POWER_FULL : POWER_LOW;
+    PowerState targetState = currentlyStreaming
+                                 ? (isBrownoutRecoveryActive() ? POWER_MED
+                                                               : POWER_FULL)
+                                 : POWER_LOW;
 
     if (powerManager.getState() != targetState)
     {
@@ -1078,11 +1277,54 @@ void loop()
                     powerManager.getStateName(),
                     powerManager.getSampleRateHz());
 
-      // Update local streaming flag for LED status and other logic
+      // Update local streaming flag — LED color driven by updateStatusLED()
       isStreaming = currentlyStreaming;
-      setStatusColor(
-          isStreaming ? 0 : 50, 50,
-          isStreaming ? 0 : 50); // Green if streaming, Cyan/Purple if standby
+
+      applyNodeRadioPolicy("warm_standby");
+    }
+  }
+
+  // Send power diagnostics once per boot/recovery when link is stable.
+  if (powerDiagPending && syncManager.isTDMASynced())
+  {
+    if (currentTime - powerDiagLastSendMs > 2000)
+    {
+      bool sent = syncManager.sendPowerDiag(
+          persistedBootCount, persistedBrownoutCount,
+          (uint8_t)persistedLastResetReason, isBrownoutRecoveryActive(),
+          millis());
+      if (sent)
+      {
+        powerDiagPending = false;
+        Serial.printf("[PowerDiag] Sent: boots=%lu brownouts=%lu reason=%lu\n",
+                      (unsigned long)persistedBootCount,
+                      (unsigned long)persistedBrownoutCount,
+                      (unsigned long)persistedLastResetReason);
+      }
+      powerDiagLastSendMs = currentTime;
+    }
+  }
+
+  // Send periodic TDMA transport diagnostics once the link is stable.
+  {
+    static uint32_t lastTDMADiagSendMs = 0;
+    if (syncManager.isTDMASynced() && currentTime - lastTDMADiagSendMs >= 5000)
+    {
+      if (syncManager.sendTDMADiag(millis()))
+      {
+        lastTDMADiagSendMs = currentTime;
+      }
+    }
+  }
+
+  // Re-apply policy periodically because WiFi/ESP-NOW reinit paths can reset
+  // power-save and TX settings internally.
+  {
+    static unsigned long lastPolicyRefreshMs = 0;
+    if (currentTime - lastPolicyRefreshMs >= 1000)
+    {
+      applyNodeRadioPolicy("loop_refresh");
+      lastPolicyRefreshMs = currentTime;
     }
   }
 
@@ -1123,42 +1365,7 @@ void loop()
   if (sensorManager.isMagCalibrating())
   {
     bool stillCalibrating = sensorManager.updateMagCalibration();
-
-    // Send progress update via BLE if connected
-#if ENABLE_BLE
-    if (bleManager.isConnected())
-    {
-      static unsigned long lastMagProgressTime = 0;
-      if (currentTime - lastMagProgressTime >= 500)
-      { // Every 500ms
-        StaticJsonDocument<256> progressDoc;
-        progressDoc["type"] = "mag_calibration_progress";
-        progressDoc["progress"] = sensorManager.getMagCalibrationProgress();
-        progressDoc["isCalibrating"] = stillCalibrating;
-
-        if (!stillCalibrating)
-        {
-          progressDoc["isCalibrated"] = sensorManager.isMagCalibrated();
-        }
-
-        String progressJson;
-        serializeJson(progressDoc, progressJson);
-        bleManager.sendResponse(progressJson);
-        lastMagProgressTime = currentTime;
-      }
-    }
-#endif
   }
-
-  // Send environmental data via BLE at 10Hz (if connected for debug)
-#if ENABLE_BLE
-  static unsigned long lastEnvNotifyTime = 0;
-  if (bleManager.isConnected() && (currentTime - lastEnvNotifyTime >= 100))
-  {
-    lastEnvNotifyTime = currentTime;
-    bleManager.sendEnvironmentalData(sensorManager);
-  }
-#endif // ENABLE_BLE
 
   // Main sensor loop
   // Main sensor loop using MICROS for precise timing

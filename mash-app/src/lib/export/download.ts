@@ -1,22 +1,50 @@
-export function downloadFile(
+export async function downloadFile(
   content: string,
   filename: string,
   mimeType: string = "text/plain",
-): void {
-  downloadBlobPart(content, filename, mimeType);
+): Promise<void> {
+  await downloadBlobPart(content, filename, mimeType);
 }
 
-export function downloadBlobPart(
+export async function downloadBlobPart(
   content: BlobPart,
   filename: string,
   mimeType: string = "application/octet-stream",
-): void {
-  const blob = new Blob([content], { type: mimeType });
+): Promise<void> {
+  let blob = new Blob([content], { type: mimeType });
+  let downloadName = filename;
+  let downloadMimeType = mimeType;
+
+  const shouldCompressJson =
+    mimeType === "application/json" || filename.toLowerCase().endsWith(".json");
+
+  if (shouldCompressJson && typeof CompressionStream !== "undefined") {
+    try {
+      const compressedStream = blob
+        .stream()
+        .pipeThrough(new CompressionStream("gzip"));
+      blob = await new Response(compressedStream).blob();
+      downloadName = downloadName.endsWith(".gz")
+        ? downloadName
+        : `${downloadName}.gz`;
+      downloadMimeType = "application/gzip";
+    } catch (error) {
+      console.warn(
+        "[download] JSON gzip compression failed, downloading plain JSON:",
+        error,
+      );
+    }
+  }
+
+  if (downloadMimeType !== mimeType) {
+    blob = new Blob([blob], { type: downloadMimeType });
+  }
+
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = downloadName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

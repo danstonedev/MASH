@@ -3,38 +3,25 @@ import type {
   IConnection,
   ConnectionStatus,
 } from "./IConnection";
-import { BLEConnection } from "./BLEConnection";
 import { SerialConnection } from "./SerialConnection";
-
-export type ConnectionType = "ble" | "serial";
 
 /**
  * Connection Manager
  *
- * Manages BLE and USB Serial connections to IMU hardware.
- * WiFi connection was removed as it only supported raw data streaming,
- * not fused quaternion orientation data.
+ * Manages USB Serial connection to the Gateway hardware.
+ * The Gateway communicates with sensor nodes via ESP-NOW WiFi protocol.
  */
 export class ConnectionManager {
   activeConnection: IConnection;
-  private ble: BLEConnection;
   private serial: SerialConnection;
-  private activeType: ConnectionType = "ble";
 
   constructor() {
-    this.ble = new BLEConnection();
     this.serial = new SerialConnection();
-    this.activeConnection = this.ble;
-  }
-
-  setActive(type: ConnectionType) {
-    this.activeType = type;
-    this.activeConnection = type === "serial" ? this.serial : this.ble;
+    this.activeConnection = this.serial;
   }
 
   // Proxies
-  async connect(type: ConnectionType = this.activeType, params?: any) {
-    this.setActive(type);
+  async connect(_type?: string, params?: unknown) {
     return this.activeConnection.connect(params);
   }
 
@@ -42,39 +29,25 @@ export class ConnectionManager {
     return this.activeConnection.disconnect();
   }
 
-  async sendCommand(cmd: string, params?: any) {
+  async sendCommand(cmd: string, params?: unknown) {
     return this.activeConnection.sendCommand(cmd, params);
   }
 
   onData(cb: (data: ConnectionData) => void) {
-    this.ble.onData((data) => {
-      if (this.activeType === "ble") cb(data);
-    });
-    this.serial.onData((data) => {
-      if (this.activeType === "serial") cb(data);
-    });
+    this.serial.onData(cb);
   }
 
   onStatus(cb: (status: ConnectionStatus) => void) {
-    this.ble.onStatus((status) => {
-      if (this.activeType === "ble") cb(status);
-    });
-    this.serial.onStatus((status) => {
-      if (this.activeType === "serial") cb(status);
-    });
+    this.serial.onStatus(cb);
   }
 
   // Accessors
-  getBLE() {
-    return this.ble;
-  }
-
   getSerial() {
     return this.serial;
   }
 
-  getActiveType(): ConnectionType {
-    return this.activeType;
+  getActiveType(): "serial" {
+    return "serial";
   }
 
   getDeviceName(): string | undefined {

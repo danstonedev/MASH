@@ -1,5 +1,7 @@
 # Research-Grade Time Synchronization Architecture
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** References to `TDMADataPacket`, `TDMADataPacketV2`, and `timestampHigh` are outdated. Current protocol uses `TDMANodeDataPacket` (0x26) exclusively. See `TDMAProtocol.h` for current definitions.
+
 ## Executive Summary
 
 After comprehensive audit of the current IMU Connect data pipeline, **the system has fundamental architectural flaws** that prevent achieving research-grade temporal accuracy. The current one-way synchronization protocol, absence of clock drift compensation, and loose coupling between firmware and webapp time domains introduce **±0.5-2.0ms inter-sensor timing errors** — unacceptable for biomechanics research where <100µs is required.

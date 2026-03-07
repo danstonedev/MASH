@@ -1,5 +1,7 @@
 # ESP-NOW v2.0 Upgrade Summary
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** `TDMA_MAX_DATA_BYTES` constant has been removed. Max payload calculation now uses `ESPNOW_MAX_PAYLOAD - TDMA_NODE_DATA_HEADER_SIZE` directly. See `TDMAProtocol.h` for current definitions.
+
 ## Overview
 
 This document summarizes the ESP-NOW v2.0 upgrade for IMU Connect firmware, which dramatically simplifies the TDMA protocol by eliminating multi-packet batching complexity.

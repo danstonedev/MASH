@@ -1,4 +1,4 @@
-import type { IMUDataPacket } from "../ble/DeviceInterface";
+import type { IMUDataPacket } from "../protocol/DeviceInterface";
 
 /**
  * Jitter Buffer for IMU Data Stream.
@@ -13,7 +13,7 @@ export class JitterBuffer {
   private lastEmittedFrame: Map<number, number> = new Map(); // sensorId -> frameNumber
 
   // Config: How long to hold a packet to wait for stragglers?
-  // 40ms = 2 BLE connection intervals. Enough to catch re-ordered notifications.
+  // 40ms = enough to catch re-ordered packets from USB serial batching.
   private readonly BUFFER_DELAY_MS = 40;
 
   /**

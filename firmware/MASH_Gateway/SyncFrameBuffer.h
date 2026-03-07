@@ -18,13 +18,13 @@
  * NEW PACKET FORMAT (0x25 - SYNC_FRAME):
  * +----------+------------+------------+------------+
  * | Header   | Sensor 0   | Sensor 1   | ...        |
- * | 10 bytes | 24 bytes   | 24 bytes   | ...        |
+ * | 10 bytes | 16 bytes   | 16 bytes   | ...        |
  * +----------+------------+------------+------------+
  *
  * Header: type(1) + frameNum(4) + timestampUs(4) + sensorCount(1) = 10 bytes
- * Sensor: sensorId(1) + q[4](8) + a[3](6) + g[3](6) + flags(1) + reserved(2) = 24 bytes
+ * Sensor: sensorId(1) + a[3](6) + g[3](6) + flags(1) + reserved(2) = 16 bytes
  *
- * Max packet: 10 + (20 sensors × 24 bytes) = 490 bytes (fits in ESP-NOW v2)
+ * Max packet: 10 + (20 sensors × 16 bytes) = 330 bytes (fits in ESP-NOW v2)
  */
 
 #ifndef SYNC_FRAME_BUFFER_H
@@ -41,9 +41,14 @@
 // Configuration
 // ============================================================================
 
+// Set to 1 to enable verbose per-sensor diagnostics (cross-node, drift, RX rates)
+#ifndef SYNC_DEBUG
+#define SYNC_DEBUG 0
+#endif
+
 // Maximum sensors we expect across all nodes
 // Sized for 16-sensor goal (4 nodes × 4 sensors) with headroom for expansion.
-// Memory: 20 sensors × 24 bytes × 64 slots = 30,720 bytes (fits in PSRAM).
+// Memory: 20 sensors × 16 bytes × 64 slots = 20,480 bytes (fits in PSRAM).
 // AUDIT FIX 2026-02-08: Increased from 8→20 to support 16-sensor target.
 #define SYNC_MAX_SENSORS 20
 
@@ -52,65 +57,38 @@
 // Previously 16 (80ms) when limited to internal SRAM.
 #define SYNC_TIMESTAMP_SLOTS 64
 
-// Maximum age of a timestamp slot before it's considered stale (ms)
-// At 200Hz (5ms/frame), 55ms = 11 frame periods. This gives generous margin for
-// ESP-NOW retransmissions (~1-3ms) and freewheel frame delivery (~20ms late)
-// while still detecting truly stale slots promptly.
-// HISTORY: 25ms → 35ms → 55ms
-//   25ms: Too tight, premature partial frames from freewheeling nodes
-//   35ms: Still caused ~20% frame loss (155-162Hz vs 200Hz target)
-//   55ms: Allows 2 missed beacons (40ms) + jitter margin, with 64-slot
-//         circular buffer providing 320ms of depth to absorb the latency.
-// USB-only path (no BLE bottleneck) means this extra buffering doesn't
-// add end-to-end latency — slots drain as fast as they complete.
-#define SYNC_SLOT_TIMEOUT_MS 55
+// Primary late-sample tolerance, expressed in logical 5ms samples.
+// With frame-authoritative slot matching, lateness should be judged mainly by
+// how far the stream has advanced, not by wall-clock alone. 24 samples = 120ms.
+// This tolerates real RF / ESP-NOW lag bursts without prematurely declaring a
+// frame incomplete, while still draining the buffer well inside the 64-slot
+// (320ms) capacity.
+#define SYNC_SLOT_ADVANCE_TIMEOUT_SAMPLES 24
 
-// ============================================================================
-// TIMESTAMP TOLERANCE FOR CROSS-NODE SYNCHRONIZATION
-// ============================================================================
-// This defines how close two timestamps must be to be considered "the same"
-// and placed in the same sync frame slot.
-//
-// RESEARCH-GRADE REQUIREMENTS (200Hz output):
-// - Sample period: 5000µs (5ms)
-// - Acceptable sync error: <10% of sample period = <500µs
-// - With beacon-anchored timestamps, nodes should produce IDENTICAL timestamps
-//   (0µs difference) but we allow tolerance for:
-//   - ESP-NOW jitter in beacon delivery (~50-200µs)
-//   - Interrupt latency differences (~10-50µs)
-//   - Clock quantization effects
-//
-// With the ROUNDING fix on Node side, boundary aliasing is eliminated.
-// All nodes within ±2.5ms of a sample boundary produce identical timestamps.
-//
-// 2500µs (half a sample period) tolerance handles:
-// - ESP-NOW beacon delivery jitter (~200µs)
-// - Interrupt latency variance (~50µs)
-// - Minor crystal variance (< 100µs)
-//
-// This is tight enough to prevent matching adjacent frames while being
-// robust to real-world timing variations.
-// ============================================================================
-#define SYNC_TIMESTAMP_TOLERANCE_US 2500
+// Hard backstop in case the stream stalls and no newer samples arrive to
+// advance the sample-ordinal watermark. 180ms is intentionally looser than the
+// old 55ms fixed cutoff because slots are now keyed by (frameNumber,sampleIndex)
+// and can safely wait longer for delayed nodes.
+#define SYNC_SLOT_TIMEOUT_MS 180
 
 // ============================================================================
 // Sync Frame Packet Format (0x25 - ABSOLUTE)
 // ============================================================================
-// Original format: 24 bytes per sensor, all values absolute
+// Original format: 16 bytes per sensor, all values absolute (quaternion removed)
 // Used for: Keyframes, first packet after connection, error recovery
-// Max sensors @ 200Hz: ~13 (limited by BLE 65 KB/s)
+// Max sensors @ 200Hz: ~20 (limited by BLE 65 KB/s)
 
 #define SYNC_FRAME_PACKET_TYPE 0x25
 
-// Per-sensor data in sync frame (24 bytes - fixed size for easy parsing)
+// Per-sensor data in sync frame (16 bytes - fixed size for easy parsing)
+// Quaternion removed: VQF fusion runs in webapp from accel+gyro raw data.
 struct __attribute__((packed)) SyncFrameSensorData
 {
     uint8_t sensorId;    // Unique sensor ID (nodeId + localIndex)
-    int16_t q[4];        // Quaternion (w, x, y, z) scaled by 16384
     int16_t a[3];        // Accelerometer (x, y, z) scaled by 100 (m/s²)
     int16_t g[3];        // Gyroscope (x, y, z) scaled by 900 (°/s)
     uint8_t flags;       // Bit 0: valid, Bit 1: interpolated, Bits 2-7: reserved
-    uint8_t reserved[2]; // Padding to 24 bytes
+    uint8_t reserved[2]; // Padding to 16 bytes
 };
 
 // Sync Frame packet header
@@ -133,8 +111,8 @@ struct __attribute__((packed)) SyncFramePacket
 // the webapp parser will read corrupted sensorCount values at byte offset 9.
 static_assert(sizeof(SyncFramePacket) == 10,
               "SyncFramePacket must be exactly 10 bytes (packed)!");
-static_assert(sizeof(SyncFrameSensorData) == 24,
-              "SyncFrameSensorData must be exactly 24 bytes (packed)!");
+static_assert(sizeof(SyncFrameSensorData) == 16,
+              "SyncFrameSensorData must be exactly 16 bytes (packed)!");
 static_assert(offsetof(SyncFramePacket, type) == 0,
               "SyncFramePacket.type must be at offset 0!");
 static_assert(offsetof(SyncFramePacket, frameNumber) == 1,
@@ -159,7 +137,6 @@ struct SyncSensorSample
     uint8_t sensorId;
     uint8_t rawNodeId;        // S1-FIX: Physical node ID (MAC-derived) for identity tracking
     uint8_t localSensorIndex; // S1-FIX: Sensor's local index within its node (0-based)
-    int16_t q[4];
     int16_t a[3];
     int16_t g[3];
 };
@@ -169,8 +146,9 @@ struct SyncTimestampSlot
 {
     bool active;                                // Is this slot in use?
     bool forceEmit;                             // Force emission even if incomplete (timeout)
-    uint32_t timestampUs;                       // The synchronized timestamp
-    uint32_t frameNumber;                       // Frame number from beacon
+    uint32_t timestampUs;                       // The synchronized timestamp (stored for output, not used for matching)
+    uint32_t frameNumber;                       // TDMA super-frame number — PRIMARY matching key
+    uint8_t sampleIndex;                        // Sub-sample index within the frame (0..TDMA_SAMPLES_PER_FRAME-1) — PRIMARY matching key
     uint32_t receivedAtMs;                      // When first sample arrived (for timeout)
     uint8_t sensorsPresent;                     // Count of sensors with data
     SyncSensorSample sensors[SYNC_MAX_SENSORS]; // Per-sensor data
@@ -203,9 +181,9 @@ public:
      * @param sensorId Sensor ID (compact, sequential)
      * @param rawNodeId Physical node ID (MAC-derived) for identity tracking
      * @param localSensorIndex Sensor's local index within its node (0-based)
-     * @param timestampUs Synchronized timestamp
-     * @param frameNumber Frame number from packet
-     * @param q Quaternion data
+     * @param timestampUs Synchronized timestamp (stored for output packet, not used for slot matching)
+     * @param frameNumber TDMA super-frame number — used as primary slot-matching key
+     * @param sampleIndex Sub-sample index within the frame (0..TDMA_SAMPLES_PER_FRAME-1) — used as primary slot-matching key
      * @param a Accelerometer data
      * @param g Gyroscope data
      * @return true if sample was added, false if buffer full or invalid
@@ -216,7 +194,7 @@ public:
         uint8_t localSensorIndex,
         uint32_t timestampUs,
         uint32_t frameNumber,
-        const int16_t *q,
+        uint8_t sampleIndex,
         const int16_t *a,
         const int16_t *g);
 
@@ -321,9 +299,10 @@ private:
     uint32_t droppedFrameCount;
     uint32_t incompleteFrameCount;
     uint32_t lastUpdateMs;
+    uint64_t latestObservedSampleOrdinal;
 
     // Find or create a slot for the given timestamp
-    SyncTimestampSlot *findOrCreateSlot(uint32_t timestampUs, uint32_t frameNumber);
+    SyncTimestampSlot *findOrCreateSlot(uint32_t timestampUs, uint32_t frameNumber, uint8_t sampleIndex);
 
     // Find slot index for a sensor ID (-1 if not expected)
     int8_t getSensorIndex(uint8_t sensorId) const;

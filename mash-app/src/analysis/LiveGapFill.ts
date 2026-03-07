@@ -19,7 +19,7 @@
  * Memory: ~200 bytes per sensor (prev packet + frame counter)
  */
 
-import type { IMUDataPacket } from "../lib/ble/DeviceInterface";
+import type { IMUDataPacket } from "../lib/protocol/DeviceInterface";
 
 // ============================================================================
 // Configuration
@@ -162,6 +162,29 @@ export class LiveGapFill {
    */
   processPacket(packet: IMUDataPacket): LiveFilledPacket[] {
     if (!this._enabled) return [packet];
+
+    // Current 0x25 transport emits packet-local sync groups, not full-network
+    // per-sensor consecutive frames. A sensor can legitimately be absent from
+    // many intermediate frame numbers while another node group is transmitted.
+    // Treating those gaps as missing per-sensor samples causes synthetic packet
+    // explosions, inflated recording counts, and bogus sample-rate estimates.
+    const frameCompleteness = packet.frameCompleteness;
+    if (
+      packet.format === "0x25-sync" &&
+      frameCompleteness &&
+      typeof frameCompleteness.authoritativeExpectedCount === "number" &&
+      frameCompleteness.authoritativeExpectedCount >
+        frameCompleteness.expectedCount
+    ) {
+      const sensorId = packet.sensorId;
+      if (typeof sensorId === "number" && Number.isFinite(sensorId)) {
+        this.sensorStates.set(sensorId, {
+          lastFrameNumber: packet.frameNumber,
+          lastPacket: packet,
+        });
+      }
+      return [packet];
+    }
 
     if (
       typeof packet.sensorId !== "number" ||

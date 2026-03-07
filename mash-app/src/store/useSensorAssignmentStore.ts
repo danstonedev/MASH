@@ -523,6 +523,7 @@ export const useSensorAssignmentStore = create<SensorAssignmentState>()(
     {
       name: "imu-sensor-assignments",
       version: 1,
+      migrate: (persistedState: unknown) => persistedState as any,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         // Serialize Map to array for JSON storage

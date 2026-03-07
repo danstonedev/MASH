@@ -9,7 +9,7 @@
  *
  * Inspired by Vicon Nexus gap-fill workflow where optical marker
  * occlusions create gaps that must be identified and filled.
- * In our case, gaps come from RF packet loss, BLE congestion,
+ * In our case, gaps come from RF packet loss, ESP-NOW congestion,
  * or TDMA slot misses.
  */
 
@@ -25,6 +25,8 @@ export interface DataGap {
   segment?: string;
   startFrame: number;
   endFrame: number;
+  startTimeMs: number;
+  endTimeMs: number;
   gapLength: number; // Number of missing frames
   gapDurationMs: number; // Estimated duration based on sample rate
   severity: "minor" | "moderate" | "critical"; // <3 frames, 3-20, >20
@@ -46,6 +48,9 @@ export interface SensorReport {
   /** Frame numbers where this sensor first and last appears */
   firstFrame: number;
   lastFrame: number;
+  firstTimeMs: number;
+  lastTimeMs: number;
+  estimatedSamplePeriodMs: number;
 }
 
 /** Overall session data integrity report */
@@ -59,9 +64,12 @@ export interface GapAnalysisReport {
   uniqueFrameNumbers: number;
   firstFrame: number;
   lastFrame: number;
+  sessionStartTimeMs: number;
+  sessionEndTimeMs: number;
   expectedFrameSpan: number; // lastFrame - firstFrame + 1
   globalMissingFrames: number; // Frame numbers with zero sensors reporting
   globalCoveragePercent: number;
+  timelineCoveragePercent: number;
 
   // Timing
   estimatedSampleRateHz: number;
@@ -73,10 +81,16 @@ export interface GapAnalysisReport {
   sensorCount: number;
 
   // Cross-sensor sync
+  transportCompleteFrames: number; // Frames that satisfied their packet-local expected count
   fullyPopulatedFrames: number; // Frames where ALL sensors reported
   partiallyPopulatedFrames: number; // Frames where SOME sensors reported
   emptyFrames: number; // Frame numbers with no data at all
   syncCoveragePercent: number; // % of frames with all sensors present
+  strictEpochCoveragePercent: number; // % of transport groups with all session sensors present
+  transportCoveragePercent: number; // % of transport groups that were packet-locally complete
+  packetLocalMode: boolean;
+  packetExpectedCountMin: number;
+  packetExpectedCountMax: number;
 
   // Overall quality grade
   overallGrade: "A" | "B" | "C" | "D" | "F";
@@ -113,38 +127,70 @@ export function analyzeGaps(
   }
 
   // -------------------------------------------------------------------------
-  // 1. Build frame index: Map<frameNumber, Set<sensorId>>
+  // 1. Build transport-group index and per-sensor frame sets
   // -------------------------------------------------------------------------
-  const frameIndex = new Map<number, Set<number>>();
-  const sensorFrames = new Map<number, number[]>(); // sensorId -> sorted frame numbers
+  const frameIndex = new Map<
+    number,
+    {
+      sensors: Set<number>;
+      expectedCount: number;
+      authoritativeExpectedCount: number;
+    }
+  >();
+  /** Per-sensor: set of gateway frame numbers where this sensor reported */
+  const sensorFrameSets = new Map<number, Set<number>>();
   const sensorMeta = new Map<number, { segment?: string; name?: string }>();
 
   for (const f of frames) {
-    const fn = f.frameNumber ?? f.timestamp; // fallback to timestamp if no frameNumber
+    const timeMs = getFrameTimeMs(f);
+    const fn =
+      typeof f.frameNumber === "number" && Number.isFinite(f.frameNumber)
+        ? f.frameNumber
+        : Math.round(timeMs);
     const sid = f.sensorId ?? 0;
 
-    if (!frameIndex.has(fn)) frameIndex.set(fn, new Set());
-    frameIndex.get(fn)!.add(sid);
+    if (!frameIndex.has(fn)) {
+      frameIndex.set(fn, {
+        sensors: new Set<number>(),
+        expectedCount: 0,
+        authoritativeExpectedCount: 0,
+      });
+    }
+    const frameEntry = frameIndex.get(fn)!;
+    frameEntry.sensors.add(sid);
+    frameEntry.expectedCount = Math.max(
+      frameEntry.expectedCount,
+      Number(f.frameCompleteness?.expectedCount ?? 0),
+    );
+    frameEntry.authoritativeExpectedCount = Math.max(
+      frameEntry.authoritativeExpectedCount,
+      Number(f.frameCompleteness?.authoritativeExpectedCount ?? 0),
+    );
 
-    if (!sensorFrames.has(sid)) sensorFrames.set(sid, []);
-    sensorFrames.get(sid)!.push(fn);
+    if (!sensorFrameSets.has(sid)) sensorFrameSets.set(sid, new Set());
+    sensorFrameSets.get(sid)!.add(fn);
 
     if (!sensorMeta.has(sid)) {
       sensorMeta.set(sid, { segment: f.segment, name: f.sensorName });
     }
   }
 
-  // Sort each sensor's frames
-  for (const [, arr] of sensorFrames) {
-    arr.sort((a, b) => a - b);
-  }
-
   const allFrameNumbers = Array.from(frameIndex.keys()).sort((a, b) => a - b);
   const firstFrame = allFrameNumbers[0];
   const lastFrame = allFrameNumbers[allFrameNumbers.length - 1];
   const expectedFrameSpan = lastFrame - firstFrame + 1;
-  const sensorIds = Array.from(sensorFrames.keys()).sort((a, b) => a - b);
+  const sensorIds = Array.from(sensorFrameSets.keys()).sort((a, b) => a - b);
   const sensorCount = sensorIds.length;
+  const packetExpectedCounts = Array.from(frameIndex.values()).map((entry) =>
+    entry.expectedCount > 0 ? entry.expectedCount : entry.sensors.size,
+  );
+  const packetExpectedCountMin =
+    packetExpectedCounts.length > 0 ? Math.min(...packetExpectedCounts) : 0;
+  const packetExpectedCountMax =
+    packetExpectedCounts.length > 0 ? Math.max(...packetExpectedCounts) : 0;
+  const packetLocalMode = packetExpectedCounts.some(
+    (count) => count > 0 && count < sensorCount,
+  );
 
   // -------------------------------------------------------------------------
   // 2. Estimate sample rate and duration
@@ -185,6 +231,10 @@ export function analyzeGaps(
     totalDurationMs = expectedFrameSpan * framePeriodMs;
   }
 
+  // Session timeline anchored to the gateway's frame clock, not arrival timestamps
+  const sessionStartTimeMs = 0;
+  const sessionEndTimeMs = totalDurationMs;
+
   // -------------------------------------------------------------------------
   // 3. Global frame analysis
   // -------------------------------------------------------------------------
@@ -193,13 +243,27 @@ export function analyzeGaps(
     expectedFrameSpan > 0
       ? Math.round((allFrameNumbers.length / expectedFrameSpan) * 1000) / 10
       : 100;
+  const timelineCoveragePercent = globalCoveragePercent;
 
   // Cross-sensor sync analysis
+  let transportCompleteFrames = 0;
   let fullyPopulatedFrames = 0;
   let partiallyPopulatedFrames = 0;
 
-  for (const [, sensors] of frameIndex) {
-    if (sensors.size === sensorCount) {
+  for (const [, entry] of frameIndex) {
+    const observedCount = entry.sensors.size;
+    const packetExpected =
+      entry.expectedCount > 0 ? entry.expectedCount : observedCount;
+    const authoritativeExpected =
+      entry.authoritativeExpectedCount > 0
+        ? entry.authoritativeExpectedCount
+        : sensorCount;
+
+    if (observedCount >= packetExpected) {
+      transportCompleteFrames++;
+    }
+
+    if (observedCount >= authoritativeExpected) {
       fullyPopulatedFrames++;
     } else {
       partiallyPopulatedFrames++;
@@ -209,52 +273,95 @@ export function analyzeGaps(
   // Count truly empty frames (frame numbers that exist in the span but have no data)
   const emptyFrames = globalMissingFrames;
 
-  const syncCoveragePercent =
-    expectedFrameSpan > 0
-      ? Math.round((fullyPopulatedFrames / expectedFrameSpan) * 1000) / 10
+  const strictEpochCoveragePercent =
+    allFrameNumbers.length > 0
+      ? Math.round((fullyPopulatedFrames / allFrameNumbers.length) * 1000) / 10
       : 100;
+  const transportCoveragePercent =
+    allFrameNumbers.length > 0
+      ? Math.round((transportCompleteFrames / allFrameNumbers.length) * 1000) /
+        10
+      : 100;
+  const syncCoveragePercent = strictEpochCoveragePercent;
 
   // -------------------------------------------------------------------------
-  // 4. Per-sensor gap analysis
+  // 4. Per-sensor gap analysis (frame-number based, gateway 200Hz clock)
+  // -------------------------------------------------------------------------
+  // Gaps are ONLY detected when a sensor is missing from a gateway frame number
+  // in the contiguous sequence. Timestamp jitter is irrelevant — the gateway's
+  // frame counter is the single source of truth for synchronisation.
+  //
+  // In packet-local mode sensors alternate TDMA slots (e.g. sensor 1 gets
+  // even frames, sensor 2 gets odd). We detect each sensor's natural stride
+  // and only flag deviations from that cadence as gaps.
   // -------------------------------------------------------------------------
   const sensorReports: SensorReport[] = [];
 
   for (const sid of sensorIds) {
-    const sortedFrames = sensorFrames.get(sid)!;
+    const frameSet = sensorFrameSets.get(sid)!;
     const meta = sensorMeta.get(sid);
-    const sensorFirst = sortedFrames[0];
-    const sensorLast = sortedFrames[sortedFrames.length - 1];
-    const expectedSamples = sensorLast - sensorFirst + 1;
+    const sensorFramesSorted = Array.from(frameSet).sort((a, b) => a - b);
+    const sensorFirst = sensorFramesSorted[0];
+    const sensorLast = sensorFramesSorted[sensorFramesSorted.length - 1];
 
-    // Find gaps
+    // All timing derived from gateway frame numbers
+    const sensorFirstTimeMs = (sensorFirst - firstFrame) * framePeriodMs;
+    const sensorLastTimeMs = (sensorLast - firstFrame) * framePeriodMs;
+
+    // Compute this sensor's natural stride (median inter-frame delta).
+    // In full-network mode stride = 1; in packet-local it may be 2+ if
+    // sensors alternate TDMA slots.
+    let stride = 1;
+    if (sensorFramesSorted.length >= 3) {
+      const deltas: number[] = [];
+      for (let i = 1; i < sensorFramesSorted.length; i++) {
+        deltas.push(sensorFramesSorted[i] - sensorFramesSorted[i - 1]);
+      }
+      deltas.sort((a, b) => a - b);
+      stride = Math.max(1, deltas[Math.floor(deltas.length / 2)]);
+    }
+
+    const expectedSamples =
+      stride > 0
+        ? Math.floor((sensorLast - sensorFirst) / stride) + 1
+        : sensorFramesSorted.length;
+
+    // Find gaps: consecutive frame delta exceeds the sensor's expected stride
     const gaps: DataGap[] = [];
-    for (let i = 1; i < sortedFrames.length; i++) {
-      const delta = sortedFrames[i] - sortedFrames[i - 1];
-      if (delta > 1) {
-        const gapLength = delta - 1;
-        const gapDurationMs = gapLength * framePeriodMs;
+    for (let i = 0; i < sensorFramesSorted.length - 1; i++) {
+      const currentFrame = sensorFramesSorted[i];
+      const nextFrame = sensorFramesSorted[i + 1];
+      if (nextFrame - currentFrame > stride) {
+        // Number of missed sensor slots (not raw frame numbers)
+        const missedSlots = Math.round((nextFrame - currentFrame) / stride) - 1;
+        const gapDurationMs =
+          (nextFrame - currentFrame - stride) * framePeriodMs;
 
-        // Severity based on duration (industry-style): <15ms minor, 15-100ms moderate, >100ms critical
         let severity: DataGap["severity"] = "minor";
         if (gapDurationMs > 100) severity = "critical";
-        else if (gapDurationMs >= 15) severity = "moderate";
+        else if (gapDurationMs >= 30) severity = "moderate";
 
         gaps.push({
           sensorId: sid,
           segment: meta?.segment,
-          startFrame: sortedFrames[i - 1] + 1,
-          endFrame: sortedFrames[i] - 1,
-          gapLength,
+          startFrame: currentFrame,
+          endFrame: nextFrame,
+          startTimeMs: (currentFrame - firstFrame) * framePeriodMs,
+          endTimeMs: (nextFrame - firstFrame) * framePeriodMs,
+          gapLength: missedSlots,
           gapDurationMs,
           severity,
         });
       }
     }
 
-    const missingFrames = expectedSamples - sortedFrames.length;
+    const missingFrames = Math.max(
+      0,
+      expectedSamples - sensorFramesSorted.length,
+    );
     const coveragePercent =
       expectedSamples > 0
-        ? Math.round((sortedFrames.length / expectedSamples) * 1000) / 10
+        ? Math.round((sensorFramesSorted.length / expectedSamples) * 1000) / 10
         : 100;
 
     const longestGap =
@@ -276,7 +383,7 @@ export function analyzeGaps(
       sensorId: sid,
       segment: meta?.segment,
       sensorName: meta?.name,
-      totalSamples: sortedFrames.length,
+      totalSamples: sensorFramesSorted.length,
       expectedSamples,
       missingFrames,
       coveragePercent,
@@ -286,21 +393,29 @@ export function analyzeGaps(
       meanGapFrames,
       firstFrame: sensorFirst,
       lastFrame: sensorLast,
+      firstTimeMs: sensorFirstTimeMs,
+      lastTimeMs: sensorLastTimeMs,
+      estimatedSamplePeriodMs: framePeriodMs,
     });
   }
 
   // -------------------------------------------------------------------------
   // 5. Overall quality scoring
   // -------------------------------------------------------------------------
-  // Weighted: 40% global coverage, 30% sync coverage, 30% worst sensor
+  // Weighted score adapts to the transport contract.
+  // Packet-local sessions should not be failed just because strict full-body
+  // epochs are rare or absent on the wire.
   const worstSensorCoverage =
     sensorReports.length > 0
       ? Math.min(...sensorReports.map((s) => s.coveragePercent))
       : 100;
 
   const overallScore = Math.round(
-    globalCoveragePercent * 0.4 +
-      syncCoveragePercent * 0.3 +
+    timelineCoveragePercent * 0.35 +
+      (packetLocalMode
+        ? transportCoveragePercent
+        : strictEpochCoveragePercent) *
+        0.35 +
       worstSensorCoverage * 0.3,
   );
 
@@ -318,12 +433,18 @@ export function analyzeGaps(
     `${sensorCount} sensor(s) across ${allFrameNumbers.length.toLocaleString()} unique frames`,
   );
 
+  if (packetLocalMode) {
+    notes.push(
+      `Multi-node session (${packetExpectedCountMin}-${packetExpectedCountMax} sensors per node frame). Per-node transport integrity reported.`,
+    );
+  }
+
   if (globalMissingFrames > 0) {
     notes.push(
-      `${globalMissingFrames.toLocaleString()} global frame gaps detected (${(100 - globalCoveragePercent).toFixed(1)}% loss)`,
+      `${globalMissingFrames.toLocaleString()} timeline gaps detected (${(100 - timelineCoveragePercent).toFixed(1)}% loss)`,
     );
   } else {
-    notes.push("No global frame gaps — continuous sequence");
+    notes.push("No timeline gaps — continuous transport sequence");
   }
 
   const criticalGaps = sensorReports.reduce(
@@ -344,12 +465,18 @@ export function analyzeGaps(
       `⚠ ${criticalGaps} critical gap(s) (>100ms) — may affect analysis quality`,
     );
   if (moderateGaps > 0)
-    notes.push(`${moderateGaps} moderate gap(s) (15-100ms)`);
-  if (minorGaps > 0) notes.push(`${minorGaps} minor gap(s) (<15ms)`);
+    notes.push(`${moderateGaps} moderate gap(s) (30-100ms)`);
+  if (minorGaps > 0) notes.push(`${minorGaps} minor gap(s) (<30ms)`);
 
-  if (syncCoveragePercent < 90) {
+  if (transportCoveragePercent < 99) {
     notes.push(
-      `Cross-sensor sync: only ${syncCoveragePercent}% of frames have all sensors — check node connectivity`,
+      `Packet-local transport completeness: ${transportCoveragePercent}% of transport groups satisfied their advertised packet size`,
+    );
+  }
+
+  if (strictEpochCoveragePercent < 90) {
+    notes.push(
+      `Full-array sync: ${strictEpochCoveragePercent}% of frame groups contained all ${sensorCount} session sensors`,
     );
   }
 
@@ -360,18 +487,27 @@ export function analyzeGaps(
     uniqueFrameNumbers: allFrameNumbers.length,
     firstFrame,
     lastFrame,
+    sessionStartTimeMs,
+    sessionEndTimeMs,
     expectedFrameSpan,
     globalMissingFrames,
     globalCoveragePercent,
+    timelineCoveragePercent,
     estimatedSampleRateHz: estimatedRate,
     framePeriodMs,
     totalDurationMs,
     sensorReports,
     sensorCount,
+    transportCompleteFrames,
     fullyPopulatedFrames,
     partiallyPopulatedFrames,
     emptyFrames,
     syncCoveragePercent,
+    strictEpochCoveragePercent,
+    transportCoveragePercent,
+    packetLocalMode,
+    packetExpectedCountMin,
+    packetExpectedCountMax,
     overallGrade,
     overallScore,
     summaryNotes: notes,
@@ -390,22 +526,80 @@ function emptyReport(sessionId: string, analyzedAt: number): GapAnalysisReport {
     uniqueFrameNumbers: 0,
     firstFrame: 0,
     lastFrame: 0,
+    sessionStartTimeMs: 0,
+    sessionEndTimeMs: 0,
     expectedFrameSpan: 0,
     globalMissingFrames: 0,
     globalCoveragePercent: 0,
+    timelineCoveragePercent: 0,
     estimatedSampleRateHz: 0,
     framePeriodMs: 0,
     totalDurationMs: 0,
     sensorReports: [],
     sensorCount: 0,
+    transportCompleteFrames: 0,
     fullyPopulatedFrames: 0,
     partiallyPopulatedFrames: 0,
     emptyFrames: 0,
     syncCoveragePercent: 0,
+    strictEpochCoveragePercent: 0,
+    transportCoveragePercent: 0,
+    packetLocalMode: false,
+    packetExpectedCountMin: 0,
+    packetExpectedCountMax: 0,
     overallGrade: "F",
     overallScore: 0,
     summaryNotes: ["No frames in session"],
   };
+}
+
+function getFrameTimeMs(frame: RecordedFrame): number {
+  // Playback integrity should follow the gateway-aligned sync timeline that was
+  // persisted into `timestamp` during recording. `systemTime` reflects recorder
+  // arrival/persist jitter and will create false gaps for healthy packet-local
+  // sessions if used as the primary analysis clock.
+  if (typeof frame.timestamp === "number" && Number.isFinite(frame.timestamp)) {
+    return frame.timestamp;
+  }
+
+  if (
+    typeof frame.systemTime === "number" &&
+    Number.isFinite(frame.systemTime)
+  ) {
+    return frame.systemTime;
+  }
+
+  if (
+    typeof frame.timestampUs === "number" &&
+    Number.isFinite(frame.timestampUs)
+  ) {
+    return frame.timestampUs / 1000;
+  }
+
+  return typeof frame.frameNumber === "number" &&
+    Number.isFinite(frame.frameNumber)
+    ? frame.frameNumber * 5
+    : 0;
+}
+
+function estimateMedianSamplePeriodMs(
+  timesMs: number[],
+  fallbackMs: number,
+): number {
+  const deltas: number[] = [];
+  for (let i = 1; i < timesMs.length; i++) {
+    const delta = timesMs[i] - timesMs[i - 1];
+    if (delta > 0) {
+      deltas.push(delta);
+    }
+  }
+
+  if (deltas.length === 0) {
+    return fallbackMs;
+  }
+
+  deltas.sort((a, b) => a - b);
+  return deltas[Math.floor(deltas.length / 2)] ?? fallbackMs;
 }
 
 /**

@@ -218,10 +218,18 @@ export class VQF {
         VQF.variance(this.accelZWindow);
       const accelDeviation = Math.abs(accelMag - GRAVITY);
 
+      // Mean gyro magnitude over the window — maps directly to params.restThGyro.
+      // Combined with variance check: gyroVar catches micro-jitter even when
+      // the mean is low, while mean catch slow drifts gyroVar might miss.
+      const gyroMagMean =
+        this.gyroMagWindow.reduce((s, v) => s + v, 0) /
+        this.gyroMagWindow.length;
+
       this.restDetected =
-        gyroVar < REST_GYRO_VAR_TH &&
-        accelVarTotal < REST_ACCEL_VAR_TH &&
-        accelDeviation < REST_ACCEL_MAG_TH;
+        gyroVar < REST_GYRO_VAR_TH && // low jitter (baseline)
+        gyroMagMean < this.params.restThGyro && // mean rotation below threshold (user-tunable)
+        accelVarTotal < REST_ACCEL_VAR_TH && // stable accelerometer
+        accelDeviation < this.params.restThAcc; // near-1G gravity (user-tunable)
     } else {
       this.restDetected = false;
     }
@@ -270,9 +278,15 @@ export class VQF {
 
     const accelTrust = accelConfidence * gyroConfidence;
 
-    // Adaptive gain
+    // Adaptive gain — Mahony-style: gain = dt / tauAcc.
+    // At rest (motionBlend=0) we use 3× the motion gain for fast convergence,
+    // matching the original REST_GAIN / MOTION_GAIN ratio.
+    // This makes tauAcc a real, meaningful knob: lower → faster corrections.
+    const motionGainDynamic = dt / this.params.tauAcc;
+    const restGainDynamic = motionGainDynamic * 3.0;
     const motionBlend = Math.min(1, gyroMag / MOTION_BLEND_TH);
-    const baseGain = REST_GAIN + motionBlend * (MOTION_GAIN - REST_GAIN);
+    const baseGain =
+      restGainDynamic + motionBlend * (motionGainDynamic - restGainDynamic);
     let adaptiveGain = baseGain * accelTrust;
 
     // Error-proportional recovery
@@ -411,6 +425,7 @@ export class VQF {
       updateCount: this._updateCount,
       bias: this.bias.clone(),
       restDetected: this.restDetected,
+      restConfirmedFrames: this.restConfirmedFrames,
     };
   }
 
@@ -494,4 +509,3 @@ export class VQF {
     return v / n;
   }
 }
-

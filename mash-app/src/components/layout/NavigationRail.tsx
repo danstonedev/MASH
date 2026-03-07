@@ -1,5 +1,5 @@
 import {
-  Bluetooth,
+  Usb,
   BarChart3,
   Settings,
   FlaskConical,
@@ -34,8 +34,8 @@ export function NavigationRail({
   onTabChange,
 }: NavigationRailProps) {
   const tabs = [
-    { id: "connect", icon: Bluetooth, label: "Connect" },
-    // { id: "xsens", icon: Bluetooth, label: "Xsens" },
+    { id: "connect", icon: Usb, label: "Connect" },
+    // { id: "xsens", icon: Usb, label: "Xsens" },
 
     { id: "playback", icon: Layers, label: "Playback" },
     { id: "athletes", icon: Users, label: "Athletes" },

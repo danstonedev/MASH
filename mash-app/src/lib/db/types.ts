@@ -1,7 +1,7 @@
 import type {
   IMUDataPacket,
   EnvironmentalDataPacket,
-} from "../ble/DeviceInterface";
+} from "../protocol/DeviceInterface";
 
 /**
  * Serialized calibration offset for storage.
@@ -32,6 +32,8 @@ export interface RecordedFrame extends IMUDataPacket {
     validCount: number;
     expectedCount: number;
     isComplete: boolean;
+    authoritativeExpectedCount?: number;
+    activeStreamingCount?: number;
   };
   /**
    * Bitfield of integrity anomalies detected on this packet.

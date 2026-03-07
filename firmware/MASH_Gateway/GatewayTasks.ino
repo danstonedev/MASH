@@ -1,11 +1,11 @@
 /*******************************************************************************
- * GatewayTasks.ino - FreeRTOS tasks, serial frame utilities, delta decoder
+ * GatewayTasks.ino - FreeRTOS tasks, serial frame utilities, node data decoder
  *
  * This file is auto-concatenated to MASH_Gateway.ino by the Arduino build
  * system. All globals/types defined in the main .ino are visible here.
  *
  * Contents:
- *   - decodeNodeDelta()      — 0x26 delta packet decoder
+ *   - decodeNodeData()       — 0x26 node data packet decoder
  *   - enqueueSerialFrame()   — length-prefixed frame enqueue
  *   - enqueueJsonFrame()     — JSON command response enqueue
  *   - logJson()              — structured log during streaming
@@ -15,31 +15,30 @@
  ******************************************************************************/
 
 // ============================================================================
-// NODE DELTA DECODER (Phase 4 - Node-Side Delta to Absolute)
+// NODE DATA DECODER (0x26)
 // ============================================================================
-// Decodes 0x26 packets from Nodes (which may contain delta-encoded samples)
-// and reconstructs absolute values for further processing.
+// Decodes 0x26 packets from Nodes and extracts absolute sensor samples.
 // ============================================================================
 
-// Decode Node delta packet (0x26) to absolute values
+// Decode Node data packet (0x26) to absolute values
 // Returns number of samples decoded, or 0 on error
-// Output: reconstructed TDMABatchedSensorData array
-uint8_t decodeNodeDelta(
+// Output: TDMABatchedSensorData array
+uint8_t decodeNodeData(
     const uint8_t *inputPacket, size_t inputLen,
     TDMABatchedSensorData *outputSamples, // [sampleCount][sensorCount]
     uint8_t maxSamples, uint8_t maxSensors, uint8_t *outNodeId,
     uint32_t *outFrameNumber, uint8_t *outSensorCount)
 {
-    if (inputLen < TDMA_NODE_DELTA_HEADER_SIZE)
+    if (inputLen < TDMA_NODE_DATA_HEADER_SIZE)
     {
         return 0;
     }
 
-    const TDMANodeDeltaPacket *header = (const TDMANodeDeltaPacket *)inputPacket;
+    const TDMANodeDataPacket *header = (const TDMANodeDataPacket *)inputPacket;
 
-    if (header->type != TDMA_PACKET_DATA_DELTA)
+    if (header->type != TDMA_PACKET_NODE_DATA)
     {
-        return 0; // Not a node delta packet
+        return 0; // Not a node data packet
     }
 
     *outNodeId = header->nodeId;
@@ -55,100 +54,43 @@ uint8_t decodeNodeDelta(
         return 0; // Buffer too small
     }
 
-    const uint8_t *srcData = inputPacket + TDMA_NODE_DELTA_HEADER_SIZE;
+    const uint8_t *srcData = inputPacket + TDMA_NODE_DATA_HEADER_SIZE;
     size_t srcOffset = 0;
 
-    // Check if all keyframe (no delta encoding)
-    bool allKeyframe = (flags & NODE_DELTA_FLAG_ALL_KEYFRAME) != 0;
-    bool hasDelta = (flags & NODE_DELTA_FLAG_HAS_DELTA) != 0;
+    // Verify keyframe-only mode
+    bool allKeyframe = (flags & NODE_DATA_FLAG_KEYFRAME) != 0;
 
     // Available data bytes after header
-    size_t availableData = (inputLen > TDMA_NODE_DELTA_HEADER_SIZE)
-                               ? (inputLen - TDMA_NODE_DELTA_HEADER_SIZE)
+    size_t availableData = (inputLen > TDMA_NODE_DATA_HEADER_SIZE)
+                               ? (inputLen - TDMA_NODE_DATA_HEADER_SIZE)
                                : 0;
 
-    if (allKeyframe || !hasDelta)
+    // All nodes send keyframe-only. Reject anything else.
+    if (!allKeyframe)
     {
-        // All samples are absolute - copy with bounds checking
-        uint8_t validSamples = 0;
-        for (uint8_t s = 0; s < sampleCount; s++)
-        {
-            bool sampleComplete = true;
-            for (uint8_t i = 0; i < sensorCount; i++)
-            {
-                if (srcOffset + sizeof(TDMABatchedSensorData) > availableData)
-                {
-                    sampleComplete = false;
-                    break; // Not enough data for this sensor
-                }
-                memcpy(&outputSamples[s * maxSensors + i], srcData + srcOffset,
-                       sizeof(TDMABatchedSensorData));
-                srcOffset += sizeof(TDMABatchedSensorData);
-            }
-            if (!sampleComplete)
-                break;
-            validSamples++;
-        }
-        return validSamples;
+        return 0;
     }
 
-    // Sample 0 is always absolute (keyframe)
-    for (uint8_t i = 0; i < sensorCount; i++)
-    {
-        if (srcOffset + sizeof(TDMABatchedSensorData) > availableData)
-        {
-            return 0; // Can't even get first keyframe sample
-        }
-        memcpy(&outputSamples[i], srcData + srcOffset,
-               sizeof(TDMABatchedSensorData));
-        srcOffset += sizeof(TDMABatchedSensorData);
-    }
-
-    // Samples 1+ are delta-encoded relative to previous sample in packet
-    uint8_t validSamples = 1; // Sample 0 already decoded
-    for (uint8_t s = 1; s < sampleCount; s++)
+    // All samples are absolute - copy with bounds checking
+    uint8_t validSamples = 0;
+    for (uint8_t s = 0; s < sampleCount; s++)
     {
         bool sampleComplete = true;
         for (uint8_t i = 0; i < sensorCount; i++)
         {
-            if (srcOffset + sizeof(TDMADeltaSensorData) > availableData)
+            if (srcOffset + sizeof(TDMABatchedSensorData) > availableData)
             {
                 sampleComplete = false;
-                break;
+                break; // Not enough data for this sensor
             }
-            const TDMADeltaSensorData *delta =
-                (const TDMADeltaSensorData *)(srcData + srcOffset);
-            srcOffset += sizeof(TDMADeltaSensorData);
-
-            // Get previous sample (from this packet)
-            TDMABatchedSensorData *prev = &outputSamples[(s - 1) * maxSensors + i];
-            TDMABatchedSensorData *curr = &outputSamples[s * maxSensors + i];
-
-            // Reconstruct absolute values
-            curr->sensorId = delta->sensorId;
-            curr->timestampUs = prev->timestampUs + delta->timestampDeltaUs;
-
-            // Quaternion: add delta to previous
-            curr->q[0] = prev->q[0] + delta->dq[0];
-            curr->q[1] = prev->q[1] + delta->dq[1];
-            curr->q[2] = prev->q[2] + delta->dq[2];
-            curr->q[3] = prev->q[3] + delta->dq[3];
-
-            // Accel: copy absolute (delta packet keeps accel absolute)
-            curr->a[0] = delta->a[0];
-            curr->a[1] = delta->a[1];
-            curr->a[2] = delta->a[2];
-
-            // Gyro: add delta to previous
-            curr->g[0] = prev->g[0] + delta->dg[0];
-            curr->g[1] = prev->g[1] + delta->dg[1];
-            curr->g[2] = prev->g[2] + delta->dg[2];
+            memcpy(&outputSamples[s * maxSensors + i], srcData + srcOffset,
+                   sizeof(TDMABatchedSensorData));
+            srcOffset += sizeof(TDMABatchedSensorData);
         }
         if (!sampleComplete)
             break;
         validSamples++;
     }
-
     return validSamples;
 }
 
@@ -496,92 +438,21 @@ void DataIngestionTask(void *param)
             espNowRxProcessedCount++;
             uint8_t packetType = rxPacket.data[0];
 
-            if (packetType == TDMA_PACKET_DATA && useSyncFrameMode &&
+            // SIMP-2: 0x23 handler removed — nodes exclusively use 0x26 format.
+            // Legacy 0x23 packets are silently dropped.
+
+            if (packetType == TDMA_PACKET_NODE_DATA && useSyncFrameMode &&
                 syncFrameBufferInitialized)
             {
                 // ====================================================================
-                // 0x23 TDMA Batched IMU Data → SyncFrameBuffer
-                // ====================================================================
-                TDMADataPacket *tdmaV1 = (TDMADataPacket *)rxPacket.data;
-                uint8_t sensorCount = tdmaV1->sensorCount;
-                uint8_t sampleCount = tdmaV1->sampleCount;
-                uint32_t frameNumber = tdmaV1->frameNumber;
-                const uint8_t nodeId = tdmaV1->nodeId;
-                NodeIngestStats *ns = getNodeStatSlot(nodeId);
-                if (ns)
-                {
-                    ns->packets++;
-                }
-
-                // Detect V2 format
-                size_t v2ExpectedSize =
-                    sizeof(TDMADataPacketV2) + (sampleCount * sensorCount * 25) + 1;
-                bool isV2Format = (rxPacket.len == v2ExpectedSize);
-                size_t headerSize =
-                    isV2Format ? sizeof(TDMADataPacketV2) : sizeof(TDMADataPacket);
-
-                const uint8_t *sampleData = rxPacket.data + headerSize;
-                size_t availablePayload =
-                    (rxPacket.len > headerSize) ? (rxPacket.len - headerSize) : 0;
-
-                for (uint8_t sampleIdx = 0; sampleIdx < sampleCount; sampleIdx++)
-                {
-                    bool sampleOk = true;
-                    for (uint8_t sensorIdx = 0; sensorIdx < sensorCount; sensorIdx++)
-                    {
-                        size_t offset = (sampleIdx * sensorCount + sensorIdx) *
-                                        sizeof(TDMABatchedSensorData);
-                        if (offset + sizeof(TDMABatchedSensorData) > availablePayload)
-                        {
-                            sampleOk = false;
-                            break; // Truncated packet - stop reading
-                        }
-                        const TDMABatchedSensorData *sample =
-                            (const TDMABatchedSensorData *)(sampleData + offset);
-
-                        const uint8_t compactSensorId =
-                            syncManager.getCompactSensorId(tdmaV1->nodeId, sensorIdx);
-                        if (compactSensorId == 0)
-                        {
-                            if (ns)
-                            {
-                                ns->sampleAddFails++;
-                            }
-                            continue;
-                        }
-
-                        bool added = syncFrameBuffer.addSample(
-                            compactSensorId, tdmaV1->nodeId, sensorIdx,
-                            sample->timestampUs, frameNumber,
-                            sample->q, sample->a, sample->g);
-                        if (ns)
-                        {
-                            if (added)
-                            {
-                                ns->samplesAdded++;
-                            }
-                            else
-                            {
-                                ns->sampleAddFails++;
-                            }
-                        }
-                    }
-                    if (!sampleOk)
-                        break;
-                }
-            }
-            else if (packetType == TDMA_PACKET_DATA_DELTA && useSyncFrameMode &&
-                     syncFrameBufferInitialized)
-            {
-                // ====================================================================
-                // 0x26 Node Delta → Decode → SyncFrameBuffer
+                // 0x26 Node Data → Decode → SyncFrameBuffer
                 // ====================================================================
                 TDMABatchedSensorData decodedSamples[TDMA_SAMPLES_PER_FRAME][MAX_SENSORS]; // Max samples × max sensors per node
                 uint8_t nodeIdOut, sensorCountOut;
                 uint32_t frameNumberOut;
 
                 uint8_t decodedCount =
-                    decodeNodeDelta(rxPacket.data, rxPacket.len, &decodedSamples[0][0],
+                    decodeNodeData(rxPacket.data, rxPacket.len, &decodedSamples[0][0],
                                     TDMA_SAMPLES_PER_FRAME, MAX_SENSORS, &nodeIdOut, &frameNumberOut, &sensorCountOut);
                 NodeIngestStats *ns = getNodeStatSlot(nodeIdOut);
                 if (ns)
@@ -616,8 +487,8 @@ void DataIngestionTask(void *param)
                             bool added = syncFrameBuffer.addSample(
                                 compactSensorId, nodeIdOut, sensorIdx,
                                 sample->timestampUs,
-                                frameNumberOut, sample->q, sample->a,
-                                sample->g);
+                                frameNumberOut, sampleIdx,
+                                sample->a, sample->g);
                             if (ns)
                             {
                                 if (added)
@@ -720,6 +591,9 @@ void ProtocolTask(void *param)
     uint32_t lastBeaconUs = micros();
     const uint32_t BEACON_INTERVAL_US =
         TDMA_FRAME_PERIOD_MS * 1000; // 20ms = 20000µs
+    uint32_t suppressedPreRunningSyncFrames = 0;
+    uint32_t lastSuppressedSyncFrameLogMs = 0;
+    bool lastTDMARunningState = false;
 
     // Sync frame output buffer (reused each iteration)
     static uint8_t syncFramePacket[SYNC_FRAME_MAX_PACKET_SIZE];
@@ -763,20 +637,54 @@ void ProtocolTask(void *param)
         // ========================================================================
         if (useSyncFrameMode && syncFrameBufferInitialized)
         {
+            const bool tdmaRunning = syncManager.isTDMARunning();
+            if (tdmaRunning != lastTDMARunningState)
+            {
+                lastTDMARunningState = tdmaRunning;
+                SAFE_LOG_NB(
+                    "[Protocol] TDMA state changed: %s - sync frame emission %s\n",
+                    syncManager.getTDMAStateName(),
+                    tdmaRunning ? "ENABLED" : "SUPPRESSED");
+            }
+
             // Update buffer (expire stale slots)
             syncFrameBuffer.update();
 
-            // Emit any complete frames
+            // Product contract: SyncFrames are only allowed to leave the
+            // gateway once TDMA is fully RUNNING. Discovery/SYNC-phase frames
+            // are drained so the buffer cannot back up, but they are dropped
+            // instead of being forwarded to the webapp.
             while (syncFrameBuffer.hasCompleteFrame())
             {
                 size_t frameLen = syncFrameBuffer.getCompleteFrame(
                     syncFramePacket, sizeof(syncFramePacket));
 
-                if (frameLen > 0)
+                if (frameLen == 0)
                 {
-                    sendFramedPacketDirect(syncFramePacket, frameLen);
+                    continue;
+                }
+
+                if (tdmaRunning)
+                {
+                    enqueueSerialFrame(syncFramePacket, frameLen, false);
                     syncFrameEmitCount++;
                 }
+                else
+                {
+                    suppressedPreRunningSyncFrames++;
+                }
+            }
+
+            const uint32_t nowMs = millis();
+            if (!tdmaRunning && suppressedPreRunningSyncFrames > 0 &&
+                (nowMs - lastSuppressedSyncFrameLogMs) > 2000)
+            {
+                lastSuppressedSyncFrameLogMs = nowMs;
+                SAFE_LOG_NB(
+                    "[Protocol] Suppressed %lu pre-RUNNING SyncFrames while tdma=%s\n",
+                    suppressedPreRunningSyncFrames,
+                    syncManager.getTDMAStateName());
+                suppressedPreRunningSyncFrames = 0;
             }
         }
 

@@ -15,7 +15,7 @@
  * Analysis outputs:
  * - Per-sensor timing histograms (dt distribution)
  * - Gap detection (frames where sensors dropped out)
- * - Burst detection (BLE batching patterns)
+ * - Burst detection (USB serial batching patterns)
  * - Sensor reliability ranking
  * - Timing jitter spectral analysis
  * - Anomaly timeline with auto-classifications
@@ -31,6 +31,7 @@ import {
   getCRCTotals,
   subscribeSyncedSamples,
 } from "../connection/SyncedSampleStats";
+import { downloadBlobPart } from "../export/download";
 
 // ============================================================================
 // TYPES
@@ -793,7 +794,7 @@ class StreamAnalyzerImpl {
         timing.firmwareStdDevDtMs < 5
       ) {
         recs.push(
-          `Browser arrival jitter is ${timing.stdDevDtMs.toFixed(1)}ms but firmware timing is stable (σ=${timing.firmwareStdDevDtMs.toFixed(1)}ms). This is normal USB/BLE batching — data integrity is not affected.`,
+          `Browser arrival jitter is ${timing.stdDevDtMs.toFixed(1)}ms but firmware timing is stable (σ=${timing.firmwareStdDevDtMs.toFixed(1)}ms). This is normal USB serial batching — data integrity is not affected.`,
         );
       } else {
         recs.push(
@@ -878,16 +879,11 @@ export function exportAnalysisToJSON(
   result: StreamAnalysisResult,
   filename?: string,
 ): void {
-  const json = JSON.stringify(result, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename || `stream-analysis-${Date.now()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  void downloadBlobPart(
+    JSON.stringify(result),
+    filename || `stream-analysis-${Date.now()}.json`,
+    "application/json",
+  );
 }
 
 export function generateAnalysisReport(r: StreamAnalysisResult): string {

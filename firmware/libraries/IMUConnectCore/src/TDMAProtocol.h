@@ -23,21 +23,21 @@
  *
  * Packet Structure:
  *   - Header (TDMADataPacket): 8 bytes
- *   - Per sample per sensor (TDMABatchedSensorData): 25 bytes
+ *   - Per sample per sensor (TDMABatchedSensorData): 17 bytes (no quats)
  *   - Max payload for data: 1470 - 8 = 1462 bytes
  *
  * At 50Hz with 4 samples batched (ALL fit in single packet!):
  * | Sensors | Bytes/4-Sample | Fits in 1 Pkt? | Pkts/Frame | Notes          |
  * |---------|----------------|----------------|------------|----------------|
- * |    1    |     100        |     YES        |     1      | ✓ Single pkt   |
- * |    2    |     200        |     YES        |     1      | ✓ Single pkt   |
- * |    3    |     300        |     YES        |     1      | ✓ Single pkt   |
- * |    4    |     400        |     YES        |     1      | ✓ Single pkt   |
- * |    5    |     500        |     YES        |     1      | ✓ Single pkt   |
- * |    6    |     600        |     YES        |     1      | ✓ Single pkt   |
- * |    9    |     900        |     YES        |     1      | ✓ Single pkt   |
- * |   14    |    1400        |     YES        |     1      | ✓ Single pkt   |
- * |   58    |    1450        |     YES        |     1      | ✓ Max capacity |
+ * |    1    |      68        |     YES        |     1      | ✓ Single pkt   |
+ * |    2    |     136        |     YES        |     1      | ✓ Single pkt   |
+ * |    3    |     204        |     YES        |     1      | ✓ Single pkt   |
+ * |    4    |     272        |     YES        |     1      | ✓ Single pkt   |
+ * |    5    |     340        |     YES        |     1      | ✓ Single pkt   |
+ * |    6    |     408        |     YES        |     1      | ✓ Single pkt   |
+ * |    9    |     612        |     YES        |     1      | ✓ Single pkt   |
+ * |   14    |     952        |     YES        |     1      | ✓ Single pkt   |
+ * |   21    |    1428        |     YES        |     1      | ✓ Max capacity |
  *
  * SIMPLIFIED: Every node sends exactly 1 packet per frame, regardless of
  * sensors.
@@ -128,28 +128,23 @@
 // This allows ALL practical sensor configurations to fit in a SINGLE packet.
 // Requires Arduino-ESP32 v3.x board package (based on ESP-IDF v5.5+)
 #define ESPNOW_MAX_PAYLOAD 1470 // ESP-NOW v2.0 maximum payload size
-#define TDMA_DATA_HEADER_SIZE 8 // sizeof(TDMADataPacket) header portion
 #define TDMA_SENSOR_DATA_SIZE \
-  25                                                                     // sizeof(TDMABatchedSensorData) - includes 4-byte timestamp
-#define TDMA_MAX_DATA_BYTES (ESPNOW_MAX_PAYLOAD - TDMA_DATA_HEADER_SIZE) // 1462
+  17 // sizeof(TDMABatchedSensorData) - accel+gyro only (quats removed)
 
 // Maximum supported sensors per node
-// With v2.0: 1462 / 25 = 58 sensors per sample (theoretical max)
-// Practical limit: 14 sensors × 4 samples = 1400 bytes (fits easily)
-#define TDMA_MAX_SENSORS_PER_NODE 58
+// EC-13/SIMP-4: Reduced from 58 (theoretical ESP-NOW v2.0 max) to match
+// actual hardware limit (MAX_SENSORS=4, no multiplexer).
+// Practical: 4 sensors × 4 samples × 17 bytes = 272 bytes per packet.
+#define TDMA_MAX_SENSORS_PER_NODE 4
 
 // ============================================================================
 // TDMA Packet Types
 // ============================================================================
 
-#define TDMA_PACKET_BEACON 0x20   // Gateway → All Nodes
-#define TDMA_PACKET_REGISTER 0x21 // Node → Gateway (discovery)
-#define TDMA_PACKET_SCHEDULE 0x22 // Gateway → All Nodes (slot assignments)
-#define TDMA_PACKET_DATA 0x23     // Node → Gateway (batched IMU data, absolute)
-#define TDMA_PACKET_DATA_V3 0x24  // Gateway → WebApp (delta-compressed data)
-#define TDMA_PACKET_ACK 0x25      // Gateway → Node (optional)
-#define TDMA_PACKET_DATA_DELTA \
-  0x26 // Node → Gateway (delta-compressed IMU data)
+#define TDMA_PACKET_BEACON 0x20    // Gateway → All Nodes
+#define TDMA_PACKET_REGISTER 0x21  // Node → Gateway (discovery)
+#define TDMA_PACKET_SCHEDULE 0x22  // Gateway → All Nodes (slot assignments)
+#define TDMA_PACKET_NODE_DATA 0x26 // Node → Gateway (batched IMU data)
 
 // ============================================================================
 // TWO-WAY SYNC (PTP-Lite v2) - Research-Grade Time Synchronization
@@ -260,25 +255,14 @@ struct __attribute__((packed)) TDMASchedulePacket
 
 // Batched Data Packet (Node → Gateway)
 // Contains multiple samples per transmission with synchronized timestamps
+// Quaternions removed — webapp performs VQF fusion from raw accel/gyro.
 struct __attribute__((packed)) TDMABatchedSensorData
 {
   uint8_t sensorId;     // Sensor ID
   uint32_t timestampUs; // Synchronized timestamp in microseconds (Gateway time
                         // domain)
-  int16_t q[4];         // Quaternion (w, x, y, z) scaled by 16384
   int16_t a[3];         // Accelerometer (x, y, z) in m/s^2 * 100
   int16_t g[3];         // Gyroscope (x, y, z) in rad/s * 900
-};
-
-struct __attribute__((packed)) TDMADataPacket
-{
-  uint8_t type;         // TDMA_PACKET_DATA (0x23)
-  uint8_t nodeId;       // Sending node ID
-  uint32_t frameNumber; // Must match beacon's frameNumber
-  uint8_t sampleCount;  // Number of samples in batch (1-4)
-  uint8_t sensorCount;  // Number of sensors per sample
-  // Followed by: sampleCount * sensorCount * TDMABatchedSensorData
-  // See header documentation for packet size limits per sensor count
 };
 
 // ============================================================================
@@ -334,7 +318,7 @@ enum SyncConfidence : uint8_t
   SYNC_CONF_HIGH = 3       // Excellent sync, recent RTT measurement (<500µs)
 };
 
-// Sync quality flags - appended to TDMADataPacket when sync protocol v2 active
+// Sync quality flags - appended to node data packet when sync protocol v2 active
 struct __attribute__((packed)) SyncQualityFlags
 {
   uint16_t offsetUncertaintyUs;  // 1-sigma uncertainty estimate (0-65535 µs)
@@ -346,131 +330,35 @@ struct __attribute__((packed)) SyncQualityFlags
   uint8_t reserved : 4;          // Reserved for future use
 };
 
-// Extended data packet with sync quality (optional, when syncProtocolVersion >=
-// 2)
-struct __attribute__((packed)) TDMADataPacketV2
+// ============================================================================
+// NODE DATA PACKET (0x26) — Node → Gateway batched sensor data
+// ============================================================================
+// Each node sends one 0x26 packet per TDMA frame containing 4 batched
+// samples × N sensors. All samples are absolute (keyframe-only).
+// Optional SyncQualityFlags appended when PTP v2 is active.
+// ============================================================================
+
+// Node data packet flags
+#define NODE_DATA_FLAG_KEYFRAME 0x02 // Bit 1: All samples are absolute (always set)
+#define NODE_DATA_FLAG_SYNC_V2 0x04  // Bit 2: Contains sync quality metadata
+
+// Node data packet header (10 bytes)
+struct __attribute__((packed)) TDMANodeDataPacket
 {
-  uint8_t type;                 // TDMA_PACKET_DATA (0x23)
-  uint8_t nodeId;               // Sending node ID
-  uint32_t frameNumber;         // Must match beacon's frameNumber
-  uint8_t sampleCount;          // Number of samples in batch (1-4)
-  uint8_t sensorCount;          // Number of sensors per sample
-  SyncQualityFlags syncQuality; // Sync quality metadata (7 bytes)
-  // Followed by: sampleCount * sensorCount * TDMABatchedSensorData
-};
-
-// ============================================================================
-// TDMA DATA PACKET V3 - Delta Compression Format (Phase 3 Optimization)
-// ============================================================================
-// V3 introduces keyframe + delta architecture for ~35% bandwidth reduction.
-// - First sample per packet is always absolute (keyframe)
-// - Subsequent samples can be delta-encoded if deltas fit in int8
-// - Self-describing flags allow mixed absolute/delta within same packet
-// - Backwards compatible: WebApp can detect via type byte (0x24)
-// ============================================================================
-
-// V3 Packet Flags byte breakdown:
-// Bit 0:   hasEnviro - Environmental data appended after IMU samples
-// Bit 1:   hasDelta - Packet contains delta-encoded samples (after keyframe)
-// Bit 2-3: compressionMode - 0=none, 1=delta-quat-only, 2=delta-full
-// Bit 4-5: syncConfidence - Mirrors SyncConfidence enum (0-3)
-// Bit 6:   keyframeOnly - All samples are absolute (delta overflow fallback)
-// Bit 7:   reserved
-#define V3_FLAG_HAS_ENVIRO 0x01
-#define V3_FLAG_HAS_DELTA 0x02
-#define V3_FLAG_COMP_MASK 0x0C // Bits 2-3
-#define V3_FLAG_COMP_SHIFT 2
-#define V3_FLAG_SYNC_MASK 0x30 // Bits 4-5
-#define V3_FLAG_SYNC_SHIFT 4
-#define V3_FLAG_KEYFRAME_ONLY 0x40
-
-// Delta-compressed sensor data (16 bytes vs 25 for absolute)
-// Used for samples 1+ when deltas fit in int8 range
-struct __attribute__((packed)) TDMADeltaSensorData
-{
-  uint8_t sensorId;          // 1 byte - Sensor identifier
-  uint16_t timestampDeltaUs; // 2 bytes - Delta from previous sample (max 65ms)
-  int8_t dq[4];              // 4 bytes - Quaternion delta (scaled by 16384, ±0.0078)
-  int16_t a[3];              // 6 bytes - Accel ABSOLUTE (impacts need full precision)
-  int8_t dg[3];              // 3 bytes - Gyro delta (scaled by 900, ±0.14 rad/s)
-};
-
-// V3 packet header (14 bytes vs 8 for V1, 15 for V2)
-struct __attribute__((packed)) TDMADataPacketV3
-{
-  uint8_t type;         // TDMA_PACKET_DATA_V3 (0x24)
-  uint8_t nodeId;       // Source node ID
-  uint32_t frameNumber; // TDMA frame number for ordering
-  uint8_t flags;        // V3_FLAG_* bitfield
-  uint8_t sampleCount;  // Total samples (1-4)
-  uint8_t sensorCount;  // Sensors per sample (1-8)
-  // Sync quality (always present in V3, 5 bytes)
-  uint16_t offsetUncertaintyUs; // Sync uncertainty
-  uint16_t syncAgeMs;           // Time since last PTP exchange
-  uint8_t driftPpmDiv10;        // Drift in PPM / 10 (0-255 = 0-25.5 PPM)
-  // Payload follows: see below for format based on flags
-  //
-  // If keyframeOnly (bit 6 set):
-  //   [TDMABatchedSensorData × sampleCount × sensorCount]  (25 bytes each)
-  //
-  // If hasDelta (bit 1 set):
-  //   Sample 0: [TDMABatchedSensorData × sensorCount]      (keyframe, 25 bytes
-  //   each) Sample 1+: [TDMADeltaSensorData × sensorCount]       (delta, 16
-  //   bytes each)
-  //
-  // If hasEnviro (bit 0 set):
-  //   [EnvironmentalData] appended at end (before CRC)
-  //
-  // [CRC8] - always last byte
-};
-
-// Size constants for V3
-#define TDMA_V3_HEADER_SIZE 14
-#define TDMA_DELTA_SENSOR_SIZE 16
-#define TDMA_ABSOLUTE_SENSOR_SIZE 25
-
-// ============================================================================
-// NODE-SIDE DELTA COMPRESSION (0x26) - ESP-NOW Traffic Reduction
-// ============================================================================
-// Same concept as V3 but for Node → Gateway traffic.
-// - First sample in batch is always absolute (keyframe)
-// - Samples 1-3 use delta encoding if deltas fit in int8
-// - Reduces ESP-NOW bandwidth by ~35% (from 600 to ~390 bytes per frame)
-// - Gateway reconstructs absolute values before forwarding to BLE
-// ============================================================================
-
-// Node delta packet flags (similar to V3 but simplified)
-#define NODE_DELTA_FLAG_HAS_DELTA 0x01 // Bit 0: Contains delta samples
-#define NODE_DELTA_FLAG_ALL_KEYFRAME \
-  0x02                               // Bit 1: All samples are absolute (overflow fallback)
-#define NODE_DELTA_FLAG_SYNC_V2 0x04 // Bit 2: Contains sync quality metadata
-
-// Node-side delta packet header (10 bytes)
-struct __attribute__((packed)) TDMANodeDeltaPacket
-{
-  uint8_t type;         // TDMA_PACKET_DATA_DELTA (0x26)
+  uint8_t type;         // TDMA_PACKET_NODE_DATA (0x26)
   uint8_t nodeId;       // Sending node ID
   uint32_t frameNumber; // Must match beacon's frameNumber
-  uint8_t flags;        // NODE_DELTA_FLAG_* bitfield
+  uint8_t flags;        // NODE_DATA_FLAG_* bitfield
   uint8_t sampleCount;  // Total samples (1-4)
   uint8_t sensorCount;  // Sensors per sample
   uint8_t reserved;     // Alignment padding
-  // Payload format (based on flags):
-  //
-  // If ALL_KEYFRAME (overflow fallback):
-  //   [TDMABatchedSensorData × sampleCount × sensorCount]  (25 bytes each)
-  //
-  // If HAS_DELTA (normal operation):
-  //   Sample 0: [TDMABatchedSensorData × sensorCount]      (keyframe, 25 bytes
-  //   each) Sample 1+: [TDMADeltaSensorData × sensorCount]       (delta, 16
-  //   bytes each)
-  //
-  // Optional (if SYNC_V2): [SyncQualityFlags] (7 bytes) after sample data
-  //
-  // [CRC8] - always last byte
+  // Payload:
+  //   [TDMABatchedSensorData × sampleCount × sensorCount] (17 bytes each)
+  //   Optional: [SyncQualityFlags] (7 bytes) if NODE_DATA_FLAG_SYNC_V2 set
+  //   [CRC8] - always last byte
 };
 
-#define TDMA_NODE_DELTA_HEADER_SIZE 10
+#define TDMA_NODE_DATA_HEADER_SIZE 10
 
 // Sync protocol version in beacon flags (lower 4 bits)
 #define SYNC_PROTOCOL_VERSION_LEGACY 0x01 // One-way sync (original)
@@ -537,10 +425,10 @@ static_assert(
     sizeof(TDMABatchedSensorData) == TDMA_SENSOR_DATA_SIZE,
     "TDMABatchedSensorData size mismatch - update TDMA_SENSOR_DATA_SIZE");
 
-// Verify header size
+// Verify node data header size
 static_assert(
-    sizeof(TDMADataPacket) == TDMA_DATA_HEADER_SIZE,
-    "TDMADataPacket header size mismatch - update TDMA_DATA_HEADER_SIZE");
+    sizeof(TDMANodeDataPacket) == TDMA_NODE_DATA_HEADER_SIZE,
+    "TDMANodeDataPacket header size mismatch - update TDMA_NODE_DATA_HEADER_SIZE");
 
 // ============================================================================
 // TDMA TIMING VALIDATION (Prevents Configuration Errors)
@@ -589,11 +477,12 @@ inline uint8_t calculateMaxSamplesPerPacket(uint8_t sensorCount)
     return 0; // Invalid or unsupported sensor count
   }
 
-  // With v2.0's 1462 data bytes, we can fit many samples:
-  // Formula: 1462 / (sensorCount * 25)
-  // Example: 6 sensors = 1462 / 150 = 9 samples (we only need 4!)
+  // With v2.0's 1460 data bytes, we can fit many samples:
+  // Formula: (1470 - 10) / (sensorCount * 17)
+  // Example: 6 sensors = 1460 / 102 = 14 samples (we only need 4!)
+  const uint16_t maxDataBytes = ESPNOW_MAX_PAYLOAD - TDMA_NODE_DATA_HEADER_SIZE;
   uint8_t maxSamples =
-      TDMA_MAX_DATA_BYTES / (sensorCount * TDMA_SENSOR_DATA_SIZE);
+      maxDataBytes / (sensorCount * TDMA_SENSOR_DATA_SIZE);
 
   // Clamp to frame size - we batch 4 samples per frame
   if (maxSamples > TDMA_SAMPLES_PER_FRAME)
@@ -636,7 +525,7 @@ inline uint8_t calculatePacketsPerFrame(uint8_t sensorCount)
 //   └───────────────────┘
 //
 // Payload at 50Hz (4 samples batched):
-//   Header(8) + 4 × sensors × 25 + CRC(1) bytes
+//   Header(10) + 4 × sensors × 17 + CRC(1) bytes
 //
 // RF model — 802.11g OFDM @ 6 Mbps (pinned via esp_now_set_peer_rate_config):
 //   PHY rate is explicitly pinned to 802.11g 6 Mbps on unicast peers.
@@ -661,7 +550,7 @@ inline uint16_t calculateSlotWidth(uint8_t sensorCount)
 
   // 2. RF airtime — 802.11g OFDM @ 6 Mbps
   uint32_t payloadBytes =
-      TDMA_DATA_HEADER_SIZE +
+      TDMA_NODE_DATA_HEADER_SIZE +
       (TDMA_SAMPLES_PER_FRAME * sensorCount * TDMA_SENSOR_DATA_SIZE) + 1;
 
   //    OFDM symbol count: ceil((22 + 8×(38 + payload)) / 24)

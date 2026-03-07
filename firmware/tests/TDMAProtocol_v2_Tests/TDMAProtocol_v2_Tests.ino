@@ -75,7 +75,7 @@ void testConstants()
     TEST_ASSERT_EQUAL(1462, TDMA_MAX_DATA_BYTES, "Max data bytes is 1462 (1470-8)");
 
     // Verify sensor data size
-    TEST_ASSERT_EQUAL(25, TDMA_SENSOR_DATA_SIZE, "Sensor data size is 25 bytes");
+    TEST_ASSERT_EQUAL(17, TDMA_SENSOR_DATA_SIZE, "Sensor data size is 17 bytes");
 
     // Verify samples per frame
     TEST_ASSERT_EQUAL(4, TDMA_SAMPLES_PER_FRAME, "Samples per frame is 4 (50Hz TX)");
@@ -303,31 +303,31 @@ void testPacketStructure()
 {
     Serial.println("\n=== Test Group 7: TDMA Packet Structure ===\n");
 
-    // Verify TDMADataPacket header is 8 bytes
-    TEST_ASSERT_EQUAL(8, sizeof(TDMADataPacket), "TDMADataPacket header is 8 bytes");
+    // Verify TDMANodeDataPacket header is 10 bytes
+    TEST_ASSERT_EQUAL(10, sizeof(TDMANodeDataPacket), "TDMANodeDataPacket header is 10 bytes");
 
-    // Verify TDMABatchedSensorData is 25 bytes
-    TEST_ASSERT_EQUAL(25, sizeof(TDMABatchedSensorData),
-                      "TDMABatchedSensorData is 25 bytes");
+    // Verify TDMABatchedSensorData is 17 bytes
+    TEST_ASSERT_EQUAL(17, sizeof(TDMABatchedSensorData),
+                      "TDMABatchedSensorData is 17 bytes");
 
     // Create a test packet and verify structure
     uint8_t testBuffer[ESPNOW_MAX_PAYLOAD];
-    TDMADataPacket *header = (TDMADataPacket *)testBuffer;
+    TDMANodeDataPacket *header = (TDMANodeDataPacket *)testBuffer;
 
-    header->type = TDMA_PACKET_DATA;
+    header->type = TDMA_PACKET_NODE_DATA;
     header->nodeId = 1;
     header->frameNumber = 12345;
     header->sampleCount = 4;
     header->sensorCount = 6;
 
-    TEST_ASSERT_EQUAL(TDMA_PACKET_DATA, header->type, "Packet type field");
+    TEST_ASSERT_EQUAL(TDMA_PACKET_NODE_DATA, header->type, "Packet type field");
     TEST_ASSERT_EQUAL(1, header->nodeId, "Node ID field");
     TEST_ASSERT_EQUAL(12345, header->frameNumber, "Frame number field");
     TEST_ASSERT_EQUAL(4, header->sampleCount, "Sample count field");
     TEST_ASSERT_EQUAL(6, header->sensorCount, "Sensor count field");
 
     // Calculate expected total packet size for 6 sensors, 4 samples
-    size_t expectedSize = sizeof(TDMADataPacket) +
+    size_t expectedSize = sizeof(TDMANodeDataPacket) +
                           (6 * 4 * sizeof(TDMABatchedSensorData));
     Serial.printf("\n  Expected packet size for 6 sensors, 4 samples: %d bytes\n",
                   expectedSize);

@@ -67,7 +67,7 @@ const STALE_DATA_THRESHOLD_MS = 200; // Consider data stale after 200ms
 /**
  * Smooths timestamp jitter using a moving average filter.
  *
- * Problem: BLE packet arrival times have ~5-15ms jitter due to:
+ * Problem: Serial packet arrival times have ~5-15ms jitter due to:
  *   - Radio scheduling
  *   - OS task scheduling
  *   - GATT queue delays

@@ -2,7 +2,7 @@
  * RingBuffer - Pre-allocated circular buffer for zero-copy stream reassembly.
  *
  * Eliminates O(n) Uint8Array allocation+copy on every incoming chunk.
- * Used by both SerialConnection (USB CDC) and BLEConnection (GATT notifications)
+ * Used by SerialConnection (USB CDC) for binary stream reassembly
  * for efficient binary stream buffering.
  *
  * At 200Hz × 130 bytes/frame = 26KB/s, a 32KB ring provides ~250 frames of headroom

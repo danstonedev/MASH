@@ -10,6 +10,7 @@ import {
   FileJson,
   Check,
   Download,
+  Layers,
 } from "lucide-react";
 import { useRecordingStore } from "../../store/useRecordingStore";
 import { dataManager } from "../../lib/db";
@@ -21,7 +22,7 @@ import {
   formatExportStage,
 } from "../../lib/export/formatExportStage";
 
-type ExportFormat = "csv" | "opensim" | "json";
+type ExportFormat = "csv" | "sync-csv" | "opensim" | "json";
 
 interface ExportModalProps {
   onClose: () => void;
@@ -43,10 +44,16 @@ export function ExportModal({ onClose }: ExportModalProps) {
     desc: string;
   }[] = [
     {
+      id: "sync-csv",
+      icon: Layers,
+      label: "Sync CSV",
+      desc: "One row per sync frame, all sensors aligned",
+    },
+    {
       id: "csv",
       icon: FileSpreadsheet,
       label: "CSV",
-      desc: "Universal format with metadata",
+      desc: "One row per sensor reading (long format)",
     },
     {
       id: "opensim",
@@ -57,8 +64,8 @@ export function ExportModal({ onClose }: ExportModalProps) {
     {
       id: "json",
       icon: FileJson,
-      label: "JSON",
-      desc: "Full data with all frames",
+      label: "JSON.gz",
+      desc: "Full data with all frames, compressed",
     },
   ];
 
@@ -108,6 +115,23 @@ export function ExportModal({ onClose }: ExportModalProps) {
             {
               sessionId: currentSession.id,
               format: "csv",
+              filename,
+            },
+            {
+              signal: abortController.signal,
+              onProgress: (progress, stage) => {
+                setExportProgress(progress);
+                setExportStage(stage);
+              },
+            },
+          );
+          break;
+        case "sync-csv":
+          filename = `${currentSession.name || "session"}_sync_${Date.now()}.csv`;
+          await exportAndDownloadSessionData(
+            {
+              sessionId: currentSession.id,
+              format: "sync-csv",
               filename,
             },
             {

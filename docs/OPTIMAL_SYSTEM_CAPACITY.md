@@ -1,5 +1,7 @@
 # IMU Connect - Optimal System Capacity Analysis
 
+> **⚠️ PARTIALLY OUTDATED (March 2026):** Delta compression sections are outdated — delta compression was never implemented and has been removed. Sensor data is 17 bytes (not 25). All capacity projections should be recalculated with current sizes.
+
 ## Executive Summary
 
 This document defines the **maximum achievable capacity** of the IMU Connect system given the hardware constraints of ESP-NOW v2.0 and BLE 5.0. The analysis identifies BLE throughput as the primary bottleneck and provides optimal configurations for different use cases.
